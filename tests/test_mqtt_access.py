@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import time
 import unittest
@@ -148,14 +149,34 @@ class AccessStateTests(unittest.TestCase):
             self.assertEqual(loaded.bindings[item.identity], item)
             self.assertEqual(repository.sanitized()["devices"][0]["title"], "Подъезд")
 
-    def test_spruthub_template_uses_current_link_arrays(self) -> None:
+    def test_spruthub_template_uses_current_export_format(self) -> None:
         template = json.loads(
             (ROOT / "spruthub" / "rtkey_access.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(template["modelId"], "rtkey/access/([a-z0-9][a-z0-9_-]{0,63})/state")
+
+        self.assertEqual(
+            set(template), {"name", "manufacturer", "model", "modelIds", "services"}
+        )
+        self.assertNotIn("modelId", template)
+        self.assertIsInstance(template["modelIds"], list)
+        self.assertEqual(len(template["modelIds"]), 1)
+
+        key = binding().mqtt_key.value
+        state_topic = f"rtkey/access/{key}/state"
+        match = re.fullmatch(template["modelIds"][0], state_topic)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), key)
+
         characteristic = template["services"][0]["characteristics"][0]
         self.assertIsInstance(characteristic["link"], list)
-        self.assertEqual(characteristic["link"][0]["topicSet"], "rtkey/access/(1)/set")
+        self.assertEqual(len(characteristic["link"]), 1)
+        link = characteristic["link"][0]
+        self.assertEqual(link["type"], "String")
+        self.assertEqual(link["topicGet"].replace("(1)", key), state_topic)
+        self.assertEqual(
+            link["topicSet"].replace("(1)", key), f"rtkey/access/{key}/set"
+        )
+        self.assertEqual(link["map"], {"false": "OFF", "true": "ON"})
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 {
   "name": "RT Key access",
   "manufacturer": "Rostelecom",
-  "manufacturerId": "rtkey-gateway",
   "model": "Access point",
-  "modelId": "rtkey/access/([a-z0-9][a-z0-9_-]{0,63})/state",
-  "status": "Test",
+  "modelIds": [
+    "rtkey/access/([a-z0-9][a-z0-9_-]{0,63})/state"
+  ],
   "services": [
     {
       "name": "Open",
