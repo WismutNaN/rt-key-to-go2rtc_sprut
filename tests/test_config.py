@@ -52,22 +52,32 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.rtsp_host, "2001:db8::10")
 
     def test_default_media_profile_targets_spruthub_compatibility(self) -> None:
-        profile = Settings.from_env(environment()).media_policy.profile_for("uid")
+        settings = Settings.from_env(environment())
+        profile = settings.media_policy.profile_for("uid")
         self.assertEqual(profile.audio_mode, AudioMode.PCMA)
         self.assertEqual(profile.video_mode, VideoMode.H264)
         self.assertEqual(profile.video_fps, 30)
+        self.assertEqual(
+            [item.key for item in settings.media_policy.resolutions],
+            ["source", "1280x720", "640x360"],
+        )
 
     def test_video_override_is_parsed_by_camera_uid(self) -> None:
         settings = Settings.from_env(
             environment(
                 VIDEO_MODE="h264",
                 VIDEO_FPS="25",
+                VIDEO_RESOLUTIONS="source,960x540",
                 VIDEO_OVERRIDES_JSON='{"uid":"copy"}',
             )
         )
         profile = settings.media_policy.profile_for("uid")
         self.assertEqual(profile.video_mode, VideoMode.COPY)
         self.assertEqual(profile.video_fps, 25)
+        self.assertEqual(
+            [item.key for item in settings.media_policy.resolutions],
+            ["source", "960x540"],
+        )
 
 
 if __name__ == "__main__":

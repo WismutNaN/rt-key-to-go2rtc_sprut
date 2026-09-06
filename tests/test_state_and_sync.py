@@ -135,7 +135,17 @@ class SynchronizerTests(unittest.TestCase):
         result = use_case.refresh_once()
         self.assertEqual(result.updated, 2)
         self.assertEqual(result.next_refresh_in, 3_100)
-        self.assertEqual(gateway.names, {"podezd", "dvor"})
+        self.assertEqual(
+            gateway.names,
+            {
+                "podezd",
+                "podezd_1280x720",
+                "podezd_640x360",
+                "dvor",
+                "dvor_1280x720",
+                "dvor_640x360",
+            },
+        )
 
     def test_partial_failure_keeps_other_camera_success(self) -> None:
         repository = MemoryRepository()
@@ -214,8 +224,17 @@ class SynchronizerTests(unittest.TestCase):
         use_case = SynchronizeVideoFeeds(
             Catalog([]), gateway, MemoryRepository(state), FakeClock(1_000), MediaPolicy()
         )
-        self.assertEqual(use_case.restore_missing_runtime(), 1)
-        self.assertEqual([update[0] for update in gateway.updates], ["missing_camera"])
+        self.assertEqual(use_case.restore_missing_runtime(), 5)
+        self.assertEqual(
+            {update[0] for update in gateway.updates},
+            {
+                "missing_camera",
+                "missing_camera_1280x720",
+                "missing_camera_640x360",
+                "existing_camera_1280x720",
+                "existing_camera_640x360",
+            },
+        )
 
     def test_failed_media_probe_rolls_back_full_last_good_profile(self) -> None:
         old_upstream = SecretUrl("https://live.camera.rt.ru/old?token=old")
@@ -278,7 +297,7 @@ class SynchronizerTests(unittest.TestCase):
         second = use_case.refresh_once()
 
         self.assertEqual((first.updated, second.updated), (1, 0))
-        self.assertEqual(len(gateway.updates), 1)
+        self.assertEqual(len(gateway.updates), 3)
         self.assertIsNone(repository.state.bindings["uid"].last_error)
 
 

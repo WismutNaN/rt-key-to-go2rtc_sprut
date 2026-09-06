@@ -12,6 +12,8 @@ def build_go2rtc_source(upstream_url: SecretUrl, profile: MediaProfile) -> str:
         "copy" if profile.video_mode is VideoMode.COPY else "rtkey_h264_stable"
     )
     source = f"ffmpeg:{upstream_url.value}#input=rtkey_http#video={video}"
+    if profile.video_width is not None and profile.video_height is not None:
+        source += f"#width={profile.video_width}#height={profile.video_height}"
     if profile.audio_mode is not AudioMode.NONE:
         source += f"#audio={profile.audio_mode.value}"
     return source

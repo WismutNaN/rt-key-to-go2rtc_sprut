@@ -29,6 +29,8 @@
 - Новый source становится LKG только после RTSP/upstream probe; при отказе восстанавливаются прежние upstream и media profile.
 - Неизменившийся source/profile при существующем runtime не получает повторный
   PATCH и не запускает FFmpeg/probe.
+- Базовый и масштабированные runtime-streams обновляются как одна camera unit;
+  RTSP probe запускается только для базового варианта с тем же upstream.
 - Истёкший или истекающий менее чем через минуту token не применяется; остальные срочные повторы ограничены `retry_min`.
 - При auth error retry остаётся редким и health явно сообщает о необходимости заменить Bearer.
 - Между refresh controller раз в `RUNTIME_CHECK_SECONDS` сверяет имена go2rtc и восстанавливает пропавшие runtime-streams из действующего LKG.

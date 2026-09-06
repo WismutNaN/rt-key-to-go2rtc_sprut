@@ -90,7 +90,7 @@ def build_container(settings: Settings) -> Container:
         settings.snapshot_listen_port,
         settings.rtsp_username,
         settings.rtsp_password,
-        GetCameraSnapshot(repository, media_gateway),
+        GetCameraSnapshot(repository, media_gateway, settings.media_policy),
         workers=settings.snapshot_workers,
     )
     return Container(
@@ -141,17 +141,28 @@ def command_show(container: Container) -> int:
     print()
     for binding in sorted(cameras, key=lambda item: item.stream_name.value):
         print(f"{binding.title} [{binding.camera_id.value}]:")
-        print("RTSP:")
-        print(
-            f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"
-            f"{binding.stream_name.value}"
-        )
-        print("Snapshot:")
-        print(
-            f"http://{user}:{password}@{host}:{settings.snapshot_port}/snapshot/"
-            f"{binding.stream_name.value}.jpg"
-        )
-        print()
+        for variant in settings.media_policy.variants_for(
+            binding.camera_id.value,
+            base_profile=binding.last_good_profile,
+        ):
+            stream_name = variant.stream_name_value(binding.stream_name.value)
+            resolution = (
+                "исходное разрешение"
+                if variant.resolution.width is None
+                else variant.resolution.key
+            )
+            print(f"Вариант: {resolution}")
+            print("RTSP:")
+            print(
+                f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"
+                f"{stream_name}"
+            )
+            print("Snapshot:")
+            print(
+                f"http://{user}:{password}@{host}:{settings.snapshot_port}/snapshot/"
+                f"{stream_name}.jpg"
+            )
+            print()
     print("==========================================")
     return 0
 

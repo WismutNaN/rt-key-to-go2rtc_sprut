@@ -76,6 +76,7 @@ class InstallSecretTests(unittest.TestCase):
         env_text = env_file.read_text(encoding="utf-8")
         self.assertNotIn("RTKEY_ACCESS_TOKEN", env_text)
         self.assertIn("VIDEO_MODE=h264", env_text)
+        self.assertIn("VIDEO_RESOLUTIONS=source,1280x720,640x360", env_text)
         self.assertIn("AUDIO_MODE=pcma", env_text)
         self.assertIn("SNAPSHOT_PORT=8080", env_text)
 

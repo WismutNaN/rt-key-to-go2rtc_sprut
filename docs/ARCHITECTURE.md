@@ -37,7 +37,7 @@ SprutHub. Порт API `1984` доступен контейнеру `controller`
 | Клиент Ростелекома | Новый API, legacy completion/fallback, pagination и нормализация | `fetch_feeds()` |
 | Реестр камер | Стабильное соответствие UID → title-based name | `StreamNamingPolicy.reconcile()` |
 | Построитель source | Безопасно формирует URL и применяет media profile | `build_go2rtc_source()` |
-| Media policy | Независимо выбирает video/audio профиль глобально или по UID | `profile_for()` |
+| Media policy | Выбирает video/audio профиль и разрешения глобально или по UID | `profile_for()`, `variants_for()` |
 | Клиент go2rtc | Создаёт runtime-stream, меняет source и получает JPEG | `upsert_stream()`, `fetch_jpeg()` |
 | Планировщик refresh | Использует минимальный JWT `exp`, margin и retry | `SynchronizeVideoFeeds.refresh_once()` |
 | Хранилище состояния | Атомарно сохраняет mapping и last-known-good | `load()`, `save()` |
@@ -109,14 +109,16 @@ Shared kernel намеренно минимален и реализован в `
    приоритет сохраняется за новым API.
 9. Реестр сохраняет прежнее имя для известного UID. Для новой камеры он транслитерирует и нормализует `title`; при пустом или конфликтующем title добавляет короткую часть UID.
 10. Из `streamerUrl` извлекается origin медиасервера; фиксированный `live-vdk4` не используется.
-11. Для каждой валидной камеры строится ленивый `ffmpeg:` source. По умолчанию
-    он нормализует H.264 в CFR 30 fps и AAC в PCMA; `copy` можно включить
-    глобально или для отдельного UID.
-12. Контроллер выполняет `PATCH /api/streams?name=<name>&src=<source>`. В go2rtc 1.9.14 PATCH создаёт отсутствующий runtime-stream и меняет существующий без перезапуска процесса.
-13. Если source и media profile не изменились и runtime-stream существует,
-    PATCH и probe пропускаются. Иначе controller выполняет авторизованный RTSP
-    `DESCRIBE`; initial/changed upstream проверяются последовательно, чтобы не
-    запускать несколько H.264 encoder одновременно.
+11. Для каждой валидной камеры строятся три ленивых `ffmpeg:` source: исходный
+    размер, 1280x720 и 640x360. По умолчанию они нормализуют H.264 в CFR 30 fps
+    и AAC в PCMA; набор размеров настраивается одним списком.
+12. Контроллер выполняет отдельный `PATCH /api/streams?name=<name>&src=<source>`
+    для каждого варианта. Масштабированные имена получают стабильный суффикс
+    `_WIDTHxHEIGHT`. PATCH только регистрирует source и не запускает FFmpeg.
+13. Если source и media profile не изменились и все runtime-streams существуют,
+    PATCH и probe пропускаются. Пропавший масштабированный variant восстанавливается
+    отдельно. Для проверки upstream controller делает `DESCRIBE` только базового
+    варианта; initial/changed камеры проверяются последовательно.
 14. Только после успешного probe URL, срок и media profile становятся last-known-good. При ошибке прежние upstream и profile немедленно возвращаются через PATCH.
 15. Следующее обновление назначается за 15 минут до самого раннего корректного `exp`. Если `exp` отсутствует, применяется консервативный интервал четыре часа.
 16. SprutHub постоянно использует одну RTSP-ссылку; смена upstream-токена для него прозрачна.
@@ -152,7 +154,17 @@ class CameraBinding:
 class MediaProfile:
     video_mode: Literal["h264", "copy"]
     video_fps: int
+    video_width: int | None
+    video_height: int | None
     audio_mode: Literal["copy", "aac", "pcma", "pcmu", "none"]
+
+class MediaResolution:
+    width: int | None
+    height: int | None
+
+class MediaPolicy:
+    def profile_for(self, camera_id: str) -> MediaProfile: ...
+    def variants_for(self, camera_id: str) -> tuple[MediaVariant, ...]: ...
 
 class VideoCatalogPort(Protocol):
     def fetch_feeds(self) -> list[CameraFeed]: ...
@@ -197,6 +209,7 @@ GET https://vc.key.rt.ru/api/v1/cameras?limit=100&offset=0
 ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
   ?mp4-fragment-length=0.5&mp4-use-speed=0&mp4-afiller=1&token=<urlencoded-token>
   #input=rtkey_http#video=<rtkey_h264_stable|copy>
+  #width=<optional-width>#height=<optional-height>
   #audio=<copy|aac|pcma|pcmu>
 ```
 
@@ -208,6 +221,8 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 - Controller/status не выводят `streamer_token`, Bearer Token и пароли; media-логи go2rtc/FFmpeg считаются чувствительными.
 - Last-known-good не заменяется данными, которые не прошли нормализацию, PATCH и RTSP/upstream probe.
 - Неизменившийся source не заменяется повторным PATCH и не запускает media probe.
+- Набор разрешений начинается с `source`, содержит не более четырёх уникальных
+  вариантов и использует только чётные размеры H.264.
 - API go2rtc не публикуется на host-порт.
 - RTSP и snapshot всегда требуют username и password для подключений из LAN.
 - Автоматический healthcheck не является media consumer.
@@ -221,7 +236,7 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | Контроллер | `python:3.12.14-alpine3.24`, синхронный цикл | Воспроизводимый multi-arch base; runtime без сторонних Python-пакетов |
 | HTTP | Python `urllib` с TLS verification, timeout и запретом redirects | Нет runtime-зависимостей; Bearer не уйдёт на другой host через redirect |
 | go2rtc | `alexxit/go2rtc:1.9.14` | Фиксированная multi-arch версия с FFmpeg внутри |
-| Видео | Ленивый H.264 CFR 30 fps; per-UID `copy` | Устраняет нестабильные DTS/зелёный экран, но не расходует CPU без consumer |
+| Видео | Ленивый H.264 CFR 30 fps; source/720p/360p; per-UID `copy` | Устраняет нестабильные DTS и позволяет выбирать нагрузку без фонового CPU |
 | Аудио | Отдельная политика, `audio=pcma` по умолчанию | Повышает совместимость SprutHub; AAC/copy/PCMU остаются настраиваемыми |
 | Snapshot | Basic-auth proxy к внутреннему `/api/frame.jpeg` | SprutHub получает JPEG, а общий API go2rtc остаётся закрыт |
 | Runtime update | `PATCH /api/streams` | Не требует restart и умеет создать отсутствующий stream |
@@ -244,6 +259,7 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | go2rtc перезапущен | Runtime-streams исчезли | Controller повторно применяет LKG и свежие sources |
 | Повреждён state JSON | Потеря стабильного mapping | Не перезаписывать файл; использовать резервную копию и аварийный статус |
 | Неровные DTS H.264 | Зелёный экран или зависание клиента | Ленивый H.264 CFR; для стабильного источника разрешён `copy` |
+| Слишком высокая CPU при просмотре | Сервер не успевает кодировать 1080p | Использовать URL 1280x720/640x360; не открывать разные variants одновременно |
 | Аудиокодек не принят SprutHub | Видео есть, звука нет | PCMA по умолчанию, затем PCMU/AAC/copy; учитывать beta-ограничения SprutHub |
 | Snapshot временно недоступен | Нет превью, RTSP не затронут | HTTP 502/503, ограничение параллелизма и повтор клиента |
 | Камера исчезла из API | Старый endpoint остаётся, но upstream истечёт | Пометить отсутствующей; не переиспользовать её имя автоматически |

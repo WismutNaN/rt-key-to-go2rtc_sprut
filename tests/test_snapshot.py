@@ -9,6 +9,7 @@ from rtkey_gateway.domain import (
     CameraBinding,
     CameraId,
     GatewayState,
+    MediaPolicy,
     SecretUrl,
     StreamName,
 )
@@ -48,7 +49,7 @@ class SnapshotTests(unittest.TestCase):
             0,
             "spruthub",
             "rtsp-password",
-            GetCameraSnapshot(MemoryRepository(state), self.gateway),
+            GetCameraSnapshot(MemoryRepository(state), self.gateway, MediaPolicy()),
         )
         self.service.start()
         assert self.service.server is not None
@@ -74,6 +75,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(response.getheader("Content-Type"), "image/jpeg")
         self.assertEqual(response.read(), JPEG)
         self.assertEqual(self.gateway.requests, ["podezd"])
+
+    def test_scaled_snapshot_variant_is_authorized_by_media_policy(self) -> None:
+        response = self.request(
+            "/snapshot/podezd_1280x720.jpg", authorized=True
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(), JPEG)
+        self.assertEqual(self.gateway.requests, ["podezd_1280x720"])
 
     def test_unknown_or_unauthenticated_path_does_not_touch_camera(self) -> None:
         unauthorized = self.request("/snapshot/podezd.jpg", authorized=False)

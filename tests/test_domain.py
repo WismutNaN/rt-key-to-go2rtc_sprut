@@ -8,6 +8,7 @@ from rtkey_gateway.domain import (
     CameraId,
     GatewayState,
     MediaPolicy,
+    MediaResolution,
     SecretUrl,
     StreamName,
     StreamNamingPolicy,
@@ -80,11 +81,28 @@ class MediaPolicyTests(unittest.TestCase):
         profile = policy.profile_for("uid")
         self.assertEqual(profile.video_mode, VideoMode.H264)
         self.assertEqual(profile.audio_mode, AudioMode.PCMA)
+        self.assertEqual(profile.audio_mode, AudioMode.PCMA)
 
     def test_compatibility_defaults_are_stable_h264(self) -> None:
-        profile = MediaPolicy().profile_for("uid")
+        policy = MediaPolicy()
+        profile = policy.profile_for("uid")
         self.assertEqual(profile.video_mode, VideoMode.H264)
         self.assertEqual(profile.video_fps, 30)
+        self.assertEqual(
+            [variant.resolution.key for variant in policy.variants_for("uid")],
+            ["source", "1280x720", "640x360"],
+        )
+
+    def test_scaled_variant_forces_h264_and_has_stable_name(self) -> None:
+        policy = MediaPolicy(default_video=VideoMode.COPY)
+        variants = policy.variants_for("uid")
+        self.assertEqual(variants[0].profile.video_mode, VideoMode.COPY)
+        self.assertEqual(variants[1].profile.video_mode, VideoMode.H264)
+        self.assertEqual(variants[1].stream_name_value("camera"), "camera_1280x720")
+
+    def test_resolution_rejects_odd_h264_dimensions(self) -> None:
+        with self.assertRaises(ValidationError):
+            MediaResolution.parse("1279x720")
 
     def test_invalid_mode_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):

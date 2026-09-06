@@ -66,6 +66,19 @@ class Go2RtcGatewayTests(unittest.TestCase):
         )
         self.assertIn("#video=rtkey_h264_stable#audio=pcma", source)
 
+    def test_scaled_profile_adds_go2rtc_dimensions(self) -> None:
+        source = build_go2rtc_source(
+            SecretUrl("https://x.camera.rt.ru/live?token=secret"),
+            MediaProfile(
+                AudioMode.PCMA,
+                VideoMode.H264,
+                30,
+                video_width=1280,
+                video_height=720,
+            ),
+        )
+        self.assertIn("#width=1280#height=720#audio=pcma", source)
+
     def test_snapshot_uses_internal_authenticated_api(self) -> None:
         transport = Go2RtcTransport()
         gateway = Go2RtcMediaGateway(

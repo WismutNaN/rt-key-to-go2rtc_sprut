@@ -21,10 +21,16 @@ RTSP_PORT="${RTSP_PORT:-$(read_env RTSP_PORT)}"
 RTSP_PORT="${RTSP_PORT:-8554}"
 SNAPSHOT_PORT="${SNAPSHOT_PORT:-$(read_env SNAPSHOT_PORT)}"
 SNAPSHOT_PORT="${SNAPSHOT_PORT:-8080}"
+SNAPSHOT_WORKERS="${SNAPSHOT_WORKERS:-$(read_env SNAPSHOT_WORKERS)}"
+SNAPSHOT_WORKERS="${SNAPSHOT_WORKERS:-2}"
+RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-$(read_env RTSP_PROBE_WORKERS)}"
+RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-1}"
 AUDIO_MODE="${AUDIO_MODE:-$(read_env AUDIO_MODE)}"
 AUDIO_MODE="${AUDIO_MODE:-pcma}"
 VIDEO_MODE="${VIDEO_MODE:-$(read_env VIDEO_MODE)}"
 VIDEO_MODE="${VIDEO_MODE:-h264}"
+VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-$(read_env VIDEO_RESOLUTIONS)}"
+VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-source,1280x720,640x360}"
 
 usage() {
     cat <<'USAGE'
@@ -35,12 +41,15 @@ usage() {
   --server-ip <IP>      IP сервера, который увидит SprutHub
   --rtsp-port <PORT>    внешний RTSP-порт (по умолчанию 8554)
   --snapshot-port <PORT> внешний HTTP snapshot-порт (по умолчанию 8080)
+  --snapshot-workers <N> не более N одновременных снимков (по умолчанию 2)
+  --probe-workers <N>  параллельные первичные проверки (по умолчанию 1)
   --audio <MODE>        copy|aac|pcma|pcmu|none (по умолчанию pcma)
   --video <MODE>        h264|copy (по умолчанию стабильный h264)
+  --resolutions <LIST>  source,1280x720,640x360 (от одного до четырёх)
   -h, --help            показать справку
 
 Также поддерживаются ACCESS_TOKEN, SERVER_IP, RTSP_PORT, SNAPSHOT_PORT,
-AUDIO_MODE и VIDEO_MODE.
+AUDIO_MODE, VIDEO_MODE и VIDEO_RESOLUTIONS.
 Docker Engine и команда "docker compose" должны быть установлены заранее.
 USAGE
 }
@@ -62,10 +71,16 @@ while [[ $# -gt 0 ]]; do
         --rtsp-port=*) RTSP_PORT="${1#*=}"; shift ;;
         --snapshot-port) require_value "$@"; SNAPSHOT_PORT="$2"; shift 2 ;;
         --snapshot-port=*) SNAPSHOT_PORT="${1#*=}"; shift ;;
+        --snapshot-workers) require_value "$@"; SNAPSHOT_WORKERS="$2"; shift 2 ;;
+        --snapshot-workers=*) SNAPSHOT_WORKERS="${1#*=}"; shift ;;
+        --probe-workers) require_value "$@"; RTSP_PROBE_WORKERS="$2"; shift 2 ;;
+        --probe-workers=*) RTSP_PROBE_WORKERS="${1#*=}"; shift ;;
         --audio) require_value "$@"; AUDIO_MODE="$2"; shift 2 ;;
         --audio=*) AUDIO_MODE="${1#*=}"; shift ;;
         --video) require_value "$@"; VIDEO_MODE="$2"; shift 2 ;;
         --video=*) VIDEO_MODE="${1#*=}"; shift ;;
+        --resolutions) require_value "$@"; VIDEO_RESOLUTIONS="$2"; shift 2 ;;
+        --resolutions=*) VIDEO_RESOLUTIONS="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Неизвестный аргумент: $1" >&2; usage; exit 2 ;;
     esac
@@ -88,6 +103,27 @@ case "$VIDEO_MODE" in
     h264|copy) ;;
     *) echo "Неверный video mode: $VIDEO_MODE" >&2; exit 2 ;;
 esac
+[[ "$VIDEO_RESOLUTIONS" =~ ^source(,[0-9]+x[0-9]+){0,3}$ ]] || {
+    echo "Разрешения: source и до трёх значений WIDTHxHEIGHT через запятую." >&2
+    exit 2
+}
+IFS=',' read -r -a RESOLUTION_ITEMS <<< "$VIDEO_RESOLUTIONS"
+declare -A SEEN_RESOLUTIONS=()
+for RESOLUTION_ITEM in "${RESOLUTION_ITEMS[@]}"; do
+    [[ -z "${SEEN_RESOLUTIONS[$RESOLUTION_ITEM]:-}" ]] || {
+        echo "Разрешения не должны повторяться." >&2
+        exit 2
+    }
+    SEEN_RESOLUTIONS[$RESOLUTION_ITEM]=1
+    [[ "$RESOLUTION_ITEM" == source ]] && continue
+    WIDTH="${RESOLUTION_ITEM%x*}"
+    HEIGHT="${RESOLUTION_ITEM#*x}"
+    (( WIDTH >= 160 && WIDTH <= 3840 && HEIGHT >= 90 && HEIGHT <= 2160 \
+        && WIDTH % 2 == 0 && HEIGHT % 2 == 0 )) || {
+        echo "Разрешение $RESOLUTION_ITEM должно быть чётным и в диапазоне 160x90..3840x2160." >&2
+        exit 2
+    }
+done
 [[ "$RTSP_PORT" =~ ^[0-9]+$ ]] && (( RTSP_PORT >= 1 && RTSP_PORT <= 65535 )) || {
     echo "RTSP-порт должен быть числом от 1 до 65535." >&2
     exit 2
@@ -149,8 +185,6 @@ if [[ "$SNAPSHOT_BIND_IP" == "$RTSP_BIND_IP" && "$SNAPSHOT_PORT" == "$RTSP_PORT"
     echo "RTSP и snapshot не могут использовать один host-порт на одном IP." >&2
     exit 2
 fi
-SNAPSHOT_WORKERS="$(read_env SNAPSHOT_WORKERS)"
-SNAPSHOT_WORKERS="${SNAPSHOT_WORKERS:-2}"
 [[ "$SNAPSHOT_WORKERS" =~ ^[0-9]+$ ]] \
     && (( SNAPSHOT_WORKERS >= 1 && SNAPSHOT_WORKERS <= 16 )) || {
     echo "SNAPSHOT_WORKERS должен быть числом от 1 до 16." >&2
@@ -176,8 +210,6 @@ HTTP_TIMEOUT_SECONDS="$(read_env HTTP_TIMEOUT_SECONDS)"
 HTTP_TIMEOUT_SECONDS="${HTTP_TIMEOUT_SECONDS:-20}"
 RTSP_PROBE_TIMEOUT_SECONDS="$(read_env RTSP_PROBE_TIMEOUT_SECONDS)"
 RTSP_PROBE_TIMEOUT_SECONDS="${RTSP_PROBE_TIMEOUT_SECONDS:-12}"
-RTSP_PROBE_WORKERS="$(read_env RTSP_PROBE_WORKERS)"
-RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-1}"
 [[ "$RTSP_PROBE_WORKERS" =~ ^[0-9]+$ ]] \
     && (( RTSP_PROBE_WORKERS >= 1 && RTSP_PROBE_WORKERS <= 32 )) || {
     echo "RTSP_PROBE_WORKERS должен быть числом от 1 до 32." >&2
@@ -218,6 +250,7 @@ GO2RTC_API_USERNAME=$GO2RTC_API_USERNAME
 GO2RTC_API_PASSWORD=$GO2RTC_API_PASSWORD
 VIDEO_MODE=$VIDEO_MODE
 VIDEO_FPS=$VIDEO_FPS
+VIDEO_RESOLUTIONS=$VIDEO_RESOLUTIONS
 VIDEO_OVERRIDES_JSON=$VIDEO_OVERRIDES_JSON
 AUDIO_MODE=$AUDIO_MODE
 AUDIO_OVERRIDES_JSON=$AUDIO_OVERRIDES_JSON

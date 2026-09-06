@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from rtkey_gateway.domain import AudioMode, MediaPolicy, VideoMode
+from rtkey_gateway.domain import AudioMode, MediaPolicy, MediaResolution, VideoMode
 from rtkey_gateway.errors import ValidationError
 
 
@@ -127,6 +127,13 @@ class Settings:
         video_fps = _positive_int(env, "VIDEO_FPS", 30)
         if video_fps > 60:
             raise ValidationError("VIDEO_FPS cannot be greater than 60")
+        resolutions = tuple(
+            MediaResolution.parse(item)
+            for item in env.get(
+                "VIDEO_RESOLUTIONS", "source,1280x720,640x360"
+            ).split(",")
+            if item.strip()
+        )
         suffixes = tuple(
             item.strip().lstrip(".")
             for item in env.get("ALLOWED_STREAM_HOST_SUFFIXES", "camera.rt.ru").split(",")
@@ -167,6 +174,7 @@ class Settings:
                 default_video=default_video,
                 video_overrides=video_overrides,
                 video_fps=video_fps,
+                resolutions=resolutions,
             ),
             allowed_stream_host_suffixes=suffixes,
             http_timeout=_positive_int(env, "HTTP_TIMEOUT_SECONDS", 20),

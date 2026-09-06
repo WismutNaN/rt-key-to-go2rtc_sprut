@@ -22,10 +22,17 @@ cd rt-key-to-go2rtc_sprut
 Пароль: <случайный пароль>
 
 Подъезд [camera-uid]:
+Вариант: исходное разрешение
 RTSP:
 rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd
 Snapshot:
 http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd.jpg
+
+Вариант: 1280x720
+RTSP:
+rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd_1280x720
+Snapshot:
+http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd_1280x720.jpg
 ==========================================
 ```
 

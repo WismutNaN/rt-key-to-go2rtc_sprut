@@ -18,6 +18,8 @@ from rtkey_gateway.domain import (
     GatewayState,
     MediaPolicy,
     MediaProfile,
+    SecretUrl,
+    StreamName,
     StreamNamingPolicy,
 )
 from rtkey_gateway.errors import AuthenticationError, GatewayError, ValidationError
@@ -63,6 +65,43 @@ class SynchronizeVideoFeeds:
         self.runtime_check_interval = runtime_check_interval
         self.log = logger or logging.getLogger(__name__)
 
+    def _variant_streams(
+        self,
+        binding: CameraBinding,
+        *,
+        base_profile: MediaProfile | None = None,
+    ) -> tuple[tuple[StreamName, MediaProfile], ...]:
+        return tuple(
+            (
+                StreamName(
+                    variant.stream_name_value(binding.stream_name.value)
+                ),
+                variant.profile,
+            )
+            for variant in self.media_policy.variants_for(
+                binding.camera_id.value,
+                base_profile=base_profile,
+            )
+        )
+
+    def _upsert_variants(
+        self,
+        binding: CameraBinding,
+        upstream: SecretUrl,
+        *,
+        base_profile: MediaProfile | None = None,
+        only_names: set[str] | None = None,
+    ) -> int:
+        updated = 0
+        for stream_name, profile in self._variant_streams(
+            binding, base_profile=base_profile
+        ):
+            if only_names is not None and stream_name.value not in only_names:
+                continue
+            self.media_gateway.upsert_stream(stream_name, upstream, profile)
+            updated += 1
+        return updated
+
     def restore_last_good(self, state: GatewayState | None = None) -> int:
         state = state or self.repository.load()
         now = int(self.clock.time())
@@ -81,10 +120,11 @@ class SynchronizeVideoFeeds:
                 binding.camera_id.value
             )
             try:
-                self.media_gateway.upsert_stream(
-                    binding.stream_name, binding.last_good_upstream, profile
+                restored += self._upsert_variants(
+                    binding,
+                    binding.last_good_upstream,
+                    base_profile=profile,
                 )
-                restored += 1
             except GatewayError as exc:
                 self.log.warning(
                     "Could not restore camera %s: %s",
@@ -102,8 +142,6 @@ class SynchronizeVideoFeeds:
         for binding in state.bindings.values():
             if not binding.present or binding.last_good_upstream is None:
                 continue
-            if binding.stream_name.value in runtime_streams:
-                continue
             if (
                 binding.last_good_expires_at is not None
                 and binding.last_good_expires_at <= now + 60
@@ -112,11 +150,22 @@ class SynchronizeVideoFeeds:
             profile = binding.last_good_profile or self.media_policy.profile_for(
                 binding.camera_id.value
             )
-            try:
-                self.media_gateway.upsert_stream(
-                    binding.stream_name, binding.last_good_upstream, profile
+            expected = {
+                name.value
+                for name, _profile in self._variant_streams(
+                    binding, base_profile=profile
                 )
-                restored += 1
+            }
+            missing = expected - runtime_streams
+            if not missing:
+                continue
+            try:
+                restored += self._upsert_variants(
+                    binding,
+                    binding.last_good_upstream,
+                    base_profile=profile,
+                    only_names=missing,
+                )
             except GatewayError as exc:
                 self.log.warning(
                     "Could not reconcile camera %s: %s",
@@ -187,16 +236,23 @@ class SynchronizeVideoFeeds:
             uid = feed.camera_id.value
             binding = bindings[uid]
             profile = self.media_policy.profile_for(uid)
+            source_changed = (
+                binding.last_good_upstream != feed.upstream_url
+                or binding.last_good_profile != profile
+            )
             try:
                 if feed.expires_at is not None and feed.expires_at <= now + 60:
                     raise ValidationError(
                         "Camera API returned an expired streamer token"
                     )
-                if (
-                    binding.last_good_upstream == feed.upstream_url
-                    and binding.last_good_profile == profile
-                    and binding.stream_name.value in runtime_streams
-                ):
+                expected = {
+                    name.value
+                    for name, _variant_profile in self._variant_streams(
+                        binding, base_profile=profile
+                    )
+                }
+                missing = expected - runtime_streams
+                if not source_changed and not missing:
                     # PATCH replaces the producer and can interrupt an active RTSP
                     # consumer. A provider may return the same token near expiry,
                     # so keep the existing lazy producer until something changed.
@@ -212,13 +268,51 @@ class SynchronizeVideoFeeds:
                     )
                     expirations.append(expiry)
                     continue
-                self.media_gateway.upsert_stream(
-                    binding.stream_name, feed.upstream_url, profile
+                self._upsert_variants(
+                    binding,
+                    feed.upstream_url,
+                    base_profile=profile,
+                    only_names=missing if not source_changed else None,
                 )
+                if not source_changed and binding.stream_name.value not in missing:
+                    expiry = (
+                        feed.expires_at
+                        if feed.expires_at is not None
+                        else binding.last_good_expires_at
+                    )
+                    bindings[uid] = replace(
+                        binding,
+                        last_good_expires_at=expiry,
+                        last_error=None,
+                    )
+                    expirations.append(expiry)
+                    continue
                 pending[uid] = (feed, binding, profile)
             except GatewayError as exc:
                 failed += 1
-                bindings[uid] = replace(binding, last_error=str(exc))
+                error = str(exc)
+                old_is_usable = (
+                    source_changed
+                    and binding.last_good_upstream is not None
+                    and (
+                        binding.last_good_expires_at is None
+                        or binding.last_good_expires_at > now + 60
+                    )
+                )
+                if old_is_usable:
+                    old_profile = (
+                        binding.last_good_profile
+                        or self.media_policy.profile_for(binding.camera_id.value)
+                    )
+                    try:
+                        self._upsert_variants(
+                            binding,
+                            binding.last_good_upstream,
+                            base_profile=old_profile,
+                        )
+                    except GatewayError:
+                        error = f"{error}; last-known-good rollback failed"
+                bindings[uid] = replace(binding, last_error=error)
                 self.log.error("Camera %s update failed: %s", uid, exc)
 
         verified_names = {
@@ -246,10 +340,10 @@ class SynchronizeVideoFeeds:
                         or self.media_policy.profile_for(binding.camera_id.value)
                     )
                     try:
-                        self.media_gateway.upsert_stream(
-                            binding.stream_name,
+                        self._upsert_variants(
+                            binding,
                             binding.last_good_upstream,
-                            old_profile,
+                            base_profile=old_profile,
                         )
                     except GatewayError as exc:
                         error = f"{error}; last-known-good rollback failed"

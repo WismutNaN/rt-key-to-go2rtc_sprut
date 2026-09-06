@@ -139,8 +139,8 @@ unit/contract/architecture-тесты и статические проверки
 ## Фаза 6 — Совместимый ленивый media и snapshot
 
 **Цель**: устранить зелёный экран, предоставить snapshot и не расходовать CPU без потребителей.
-**Результат**: H.264 CFR/`copy` и независимые `pcma`, `pcmu`, `aac`, `copy`,
-`none`, включая overrides по UID; защищённый JPEG URL для каждой камеры.
+**Результат**: H.264 CFR/`copy`, варианты source/720p/360p и независимые `pcma`,
+`pcmu`, `aac`, `copy`, `none`; защищённый JPEG URL каждого варианта.
 **Статус**: [x] Реализована, [ ] проверена в SprutHub
 
 ### Выполнено
@@ -149,6 +149,8 @@ unit/contract/architecture-тесты и статические проверки
   (→ [Модуль media policy](../modules/audio_policy.md)).
 - [x] Неровные DTS нормализуются ленивым H.264 CFR-профилем с коротким GOP
   (→ [Модуль source](../modules/stream_source.md)).
+- [x] Уменьшенные разрешения получают отдельные постоянные ленивые URL; scaling
+  никогда не сочетается с `video=copy`.
 - [x] Автоматический healthcheck использует RTSP `OPTIONS` и не будит upstream;
   глубокий `DESCRIBE` доступен через `check-streams`
   (→ [Модуль диагностики](../modules/healthcheck.md)).

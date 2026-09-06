@@ -11,6 +11,7 @@ from rtkey_gateway.domain import (
     CameraBinding,
     CameraId,
     GatewayState,
+    MediaPolicy,
     SecretUrl,
     StreamName,
 )
@@ -53,6 +54,7 @@ class CliTests(unittest.TestCase):
             rtsp_host="192.168.50.99",
             rtsp_port=8554,
             snapshot_port=8080,
+            media_policy=MediaPolicy(),
         )
         container = SimpleNamespace(
             repository=MemoryRepository(state), settings=settings
@@ -65,6 +67,10 @@ class CliTests(unittest.TestCase):
         self.assertIn("rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd", rendered)
         self.assertIn(
             "http://spruthub:rtsp-password@192.168.50.99:8080/snapshot/podezd.jpg",
+            rendered,
+        )
+        self.assertIn(
+            "rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd_1280x720",
             rendered,
         )
 

@@ -127,7 +127,7 @@ class MediaVariant:
 class MediaPolicy:
     """Resolve independent audio/video modes with per-camera overrides."""
 
-    default_audio: AudioMode = AudioMode.COPY
+    default_audio: AudioMode = AudioMode.PCMA
     audio_overrides: Mapping[str, AudioMode] = field(default_factory=dict)
     default_video: VideoMode = VideoMode.H264
     video_overrides: Mapping[str, VideoMode] = field(default_factory=dict)

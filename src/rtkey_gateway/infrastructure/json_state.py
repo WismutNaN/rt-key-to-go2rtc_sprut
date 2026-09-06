@@ -68,6 +68,8 @@ class JsonVideoStateRepository:
                 {
                     "video_mode": binding.last_good_profile.video_mode.value,
                     "video_fps": binding.last_good_profile.video_fps,
+                    "video_width": binding.last_good_profile.video_width,
+                    "video_height": binding.last_good_profile.video_height,
                     "audio_mode": binding.last_good_profile.audio_mode.value,
                 }
                 if binding.last_good_profile is not None
@@ -93,6 +95,16 @@ class JsonVideoStateRepository:
                 audio_mode=AudioMode.parse(str(raw_profile.get("audio_mode", "copy"))),
                 video_mode=VideoMode.parse(str(raw_profile.get("video_mode", "copy"))),
                 video_fps=int(raw_profile.get("video_fps", 30)),
+                video_width=(
+                    int(raw_profile["video_width"])
+                    if raw_profile.get("video_width") is not None
+                    else None
+                ),
+                video_height=(
+                    int(raw_profile["video_height"])
+                    if raw_profile.get("video_height") is not None
+                    else None
+                ),
             )
             if raw_profile is not None
             else None

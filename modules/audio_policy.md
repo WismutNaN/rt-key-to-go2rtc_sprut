@@ -10,6 +10,8 @@
 |---|---|---|
 | `AudioMode` | enum | `copy`, `aac`, `pcma`, `pcmu`, `none` |
 | `VideoMode` | enum | `h264`, `copy` |
+| `MediaResolution` | value object | `source` или чётный `WIDTHxHEIGHT` |
+| `MediaVariant` | value object | Профиль и стабильное производное имя варианта |
 | `MediaProfile` | dataclass | Неизменяемые video/audio mode и `video_fps` |
 | `MediaPolicy` | class | Читает глобальные режимы и необязательные overrides по UID |
 | `AudioPolicy` | alias | Совместимость расширений с прежним именем класса |
@@ -24,8 +26,10 @@
 ## Инварианты
 
 - Значения по умолчанию — H.264 CFR 30 fps и PCMA.
+- Варианты по умолчанию — `source`, `1280x720`, `640x360`; максимум четыре.
 - Неизвестный режим завершает проверку конфигурации с понятной ошибкой до PATCH.
 - Video/audio per-camera overrides независимы и имеют приоритет над глобальными.
+- Масштабированный вариант всегда H.264: фильтр изменения размера несовместим с copy.
 - Изменение media policy не меняет публичные URL или mapping UID → name.
 
 ## Намеренно НЕ обрабатывает
