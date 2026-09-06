@@ -14,7 +14,7 @@ Commands:
   show          Show credentials, RTSP URLs, and snapshot URLs
   access        Show MQTT credentials and discovered access devices
   access-templates
-                Export one named SprutHub template per access device
+                Export one SprutHub template containing all access buttons
   status        Show containers and sanitized controller state
   media-status  Show one-time CPU, memory, and process counters
   check-streams Actively check every upstream (temporarily starts media)
@@ -77,15 +77,15 @@ case "$COMMAND" in
         mapfile -t template_files < <(
             find "$output_dir" -maxdepth 1 -type f -name '*.json' -print | sort
         )
-        if (( ${#template_files[@]} == 0 )); then
-            echo "Template export returned no JSON files." >&2
+        if (( ${#template_files[@]} != 1 )); then
+            echo "Template export must return exactly one JSON file." >&2
             exit 1
         fi
-        echo "SprutHub access templates created:"
+        echo "SprutHub access template created:"
         printf '%s\n' "${template_files[@]}"
         echo
-        echo "Import every JSON file into the SprutHub MQTT catalog."
-        echo "Each device and its button will use the Rostelecom place name."
+        echo "Import this JSON file into the SprutHub MQTT catalog."
+        echo "It contains one named button for every Rostelecom access place."
         ;;
     status)
         docker compose ps

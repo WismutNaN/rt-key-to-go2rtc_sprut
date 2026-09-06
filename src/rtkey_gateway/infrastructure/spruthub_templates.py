@@ -1,4 +1,4 @@
-"""Generate one static SprutHub MQTT template per access point."""
+"""Generate one static SprutHub MQTT template containing all access points."""
 
 from __future__ import annotations
 
@@ -16,14 +16,18 @@ from rtkey_gateway.errors import ValidationError
 
 
 _TOPIC_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9/_-]{0,127}$")
-_TEMPLATE_FILENAME_RE = re.compile(
-    r"^rtkey_[a-z0-9][a-z0-9_-]{0,63}_[0-9a-f]{8}\.json$"
-)
+_TEMPLATE_FILENAME_RE = re.compile(r"^rtkey_access_[0-9a-f]{8}\.json$")
+
+
+@dataclass(frozen=True, slots=True)
+class SprutHubAccessEntry:
+    mqtt_key: str
+    display_name: str
 
 
 @dataclass(frozen=True, slots=True)
 class SprutHubAccessTemplate:
-    mqtt_key: str
+    entries: tuple[SprutHubAccessEntry, ...]
     display_name: str
     filename: str
     content: bytes
@@ -48,11 +52,20 @@ def _display_names(bindings: tuple[AccessBinding, ...]) -> dict[str, str]:
     return names
 
 
-def build_spruthub_access_templates(
+def _aggregate_display_name(entries: tuple[SprutHubAccessEntry, ...]) -> str:
+    full_name = " | ".join(entry.display_name for entry in entries)
+    if len(full_name) <= 512:
+        return full_name
+    digest = hashlib.sha256(full_name.encode("utf-8")).hexdigest()[:10]
+    suffix = f" ... [{len(entries)}:{digest}]"
+    return full_name[: 512 - len(suffix)].rstrip(" |") + suffix
+
+
+def build_spruthub_access_template(
     bindings: Iterable[AccessBinding],
     topic_prefix: str,
-) -> tuple[SprutHubAccessTemplate, ...]:
-    """Build exact-topic templates with location names in every visible label."""
+) -> SprutHubAccessTemplate | None:
+    """Build one device containing one exact-topic switch per access point."""
     prefix = _validated_topic_prefix(topic_prefix)
     present = tuple(
         sorted(
@@ -64,52 +77,61 @@ def build_spruthub_access_templates(
     if len(mqtt_keys) != len(set(mqtt_keys)):
         raise ValidationError("Access state contains duplicate MQTT device keys")
     display_names = _display_names(present)
-    result: list[SprutHubAccessTemplate] = []
-
-    for binding in present:
-        mqtt_key = binding.mqtt_key.value
-        display_name = display_names[mqtt_key]
-        topic_base = f"{prefix}/access/{mqtt_key}"
-        document = {
-            "name": display_name,
-            "manufacturer": display_name,
-            "model": display_name,
-            "modelIds": [f"{topic_base}/state"],
-            "services": [
-                {
-                    "name": display_name,
-                    "type": "Switch",
-                    "characteristics": [
-                        {
-                            "type": "On",
-                            "link": [
-                                {
-                                    "type": "String",
-                                    "topicGet": f"{topic_base}/state",
-                                    "topicSet": f"{topic_base}/set",
-                                    "map": {"false": "OFF", "true": "ON"},
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
-        content = (
-            json.dumps(document, ensure_ascii=False, indent=2) + "\n"
-        ).encode("utf-8")
-        content_id = hashlib.sha256(content).hexdigest()[:8]
-        filename = f"rtkey_{mqtt_key}_{content_id}.json"
-        result.append(
-            SprutHubAccessTemplate(
-                mqtt_key=mqtt_key,
-                display_name=display_name,
-                filename=filename,
-                content=content,
-            )
+    if not present:
+        return None
+    entries = tuple(
+        sorted(
+            (
+                SprutHubAccessEntry(
+                    mqtt_key=binding.mqtt_key.value,
+                    display_name=display_names[binding.mqtt_key.value],
+                )
+                for binding in present
+            ),
+            key=lambda entry: (entry.display_name.casefold(), entry.mqtt_key),
+        )
+    )
+    aggregate_name = _aggregate_display_name(entries)
+    services = []
+    for entry in entries:
+        topic_base = f"{prefix}/access/{entry.mqtt_key}"
+        services.append(
+            {
+                "name": entry.display_name,
+                "type": "Switch",
+                "characteristics": [
+                    {
+                        "type": "On",
+                        "link": [
+                            {
+                                "type": "String",
+                                "topicGet": f"{topic_base}/state",
+                                "topicSet": f"{topic_base}/set",
+                                "map": {"false": "OFF", "true": "ON"},
+                            }
+                        ],
+                    }
+                ],
+            }
         )
 
-    return tuple(result)
+    document = {
+        "name": aggregate_name,
+        "manufacturer": aggregate_name,
+        "model": aggregate_name,
+        "modelIds": [f"{prefix}/access/catalog"],
+        "services": services,
+    }
+    content = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode(
+        "utf-8"
+    )
+    content_id = hashlib.sha256(content).hexdigest()[:8]
+    return SprutHubAccessTemplate(
+        entries=entries,
+        display_name=aggregate_name,
+        filename=f"rtkey_access_{content_id}.json",
+        content=content,
+    )
 
 
 def build_spruthub_template_archive(

@@ -158,7 +158,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("SprutHub MQTT access control", rendered)
         self.assertIn("Template export: ./manage.sh access-templates", rendered)
         self.assertIn("Place: Подъезд 1", rendered)
-        self.assertIn("Template file: rtkey_", rendered)
+        self.assertIn("Template file: rtkey_access_", rendered)
         self.assertIn(f"MQTT key: {binding.mqtt_key.value}", rendered)
 
         archive_data = io.BytesIO()

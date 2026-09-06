@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
@@ -270,11 +271,11 @@ class MqttAccessEvents:
             self._publish_catalog_now(snapshot)
 
     def _publish_catalog_now(self, bindings: Iterable[AccessBinding]) -> None:
+        present_keys: list[str] = []
         for binding in bindings:
             base = f"{self.topic_prefix}/access/{binding.mqtt_key.value}"
-            # Publish descriptive metadata before the discovery topic. On first
-            # discovery SprutHub can then resolve the Name characteristic and
-            # the read-only identification options immediately.
+            if binding.present:
+                present_keys.append(binding.mqtt_key.value)
             self._publish(f"{base}/name", binding.point.title, retain=True)
             self._publish(f"{base}/kind", binding.point.kind.value, retain=True)
             self._publish(
@@ -286,6 +287,16 @@ class MqttAccessEvents:
                 f"{base}/camera_id", binding.point.camera_id or "", retain=True
             )
             self._publish(f"{base}/state", "OFF", retain=True)
+        catalog_revision = hashlib.sha256(
+            "\n".join(sorted(present_keys)).encode("ascii")
+        ).hexdigest()[:16]
+        # This stable retained topic discovers the single aggregate SprutHub
+        # device only after all of its linked switch states have been published.
+        self._publish(
+            f"{self.topic_prefix}/access/catalog",
+            catalog_revision,
+            retain=True,
+        )
 
     def publish_bridge_availability(self, online: bool) -> None:
         self._publish(

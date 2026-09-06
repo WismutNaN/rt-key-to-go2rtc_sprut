@@ -28,7 +28,7 @@ class ManageTemplateExportTests(unittest.TestCase):
         content = b'{"name":"Entrance"}\n'
         archive_data = io.BytesIO()
         with tarfile.open(fileobj=archive_data, mode="w") as archive:
-            info = tarfile.TarInfo("rtkey_entrance_12345678.json")
+            info = tarfile.TarInfo("rtkey_access_12345678.json")
             info.size = len(content)
             archive.addfile(info, io.BytesIO(content))
         archive_path.write_bytes(archive_data.getvalue())
@@ -67,7 +67,7 @@ class ManageTemplateExportTests(unittest.TestCase):
         files = list((self.workspace / "generated").glob("*/*.json"))
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0].read_text(encoding="utf-8"), '{"name":"Entrance"}\n')
-        self.assertIn("SprutHub access templates created:", result.stdout)
+        self.assertIn("SprutHub access template created:", result.stdout)
 
 
 if __name__ == "__main__":

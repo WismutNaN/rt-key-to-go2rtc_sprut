@@ -21,7 +21,7 @@ from rtkey_gateway.domain import (
 from rtkey_gateway.infrastructure.json_access_state import JsonAccessStateRepository
 from rtkey_gateway.infrastructure.mqtt_access import MqttAccessEvents
 from rtkey_gateway.infrastructure.spruthub_templates import (
-    build_spruthub_access_templates,
+    build_spruthub_access_template,
     build_spruthub_template_archive,
 )
 
@@ -122,6 +122,18 @@ class MqttAccessTests(unittest.TestCase):
             published_topics.index(f"rtkey/access/{key}/name"),
             published_topics.index(f"rtkey/access/{key}/state"),
         )
+        catalog_messages = [
+            message
+            for message in self.client.published
+            if message[0] == "rtkey/access/catalog"
+        ]
+        self.assertEqual(len(catalog_messages), 1)
+        self.assertRegex(catalog_messages[0][1], r"^[0-9a-f]{16}$")
+        self.assertTrue(catalog_messages[0][3])
+        self.assertLess(
+            published_topics.index(f"rtkey/access/{key}/state"),
+            published_topics.index("rtkey/access/catalog"),
+        )
 
     def test_only_non_retained_on_command_is_forwarded(self) -> None:
         key = binding().mqtt_key.value
@@ -159,7 +171,8 @@ class AccessStateTests(unittest.TestCase):
 
     def test_spruthub_template_uses_static_place_names_and_exact_topics(self) -> None:
         item = binding()
-        generated = build_spruthub_access_templates([item], "rtkey")[0]
+        generated = build_spruthub_access_template([item], "rtkey")
+        self.assertIsNotNone(generated)
         template = json.loads(generated.content)
 
         self.assertEqual(
@@ -174,9 +187,11 @@ class AccessStateTests(unittest.TestCase):
 
         key = item.mqtt_key.value
         state_topic = f"rtkey/access/{key}/state"
-        self.assertIsNotNone(re.fullmatch(template["modelIds"][0], state_topic))
+        self.assertIsNotNone(
+            re.fullmatch(template["modelIds"][0], "rtkey/access/catalog")
+        )
         self.assertIsNone(
-            re.fullmatch(template["modelIds"][0], f"{state_topic}/unexpected")
+            re.fullmatch(template["modelIds"][0], "rtkey/access/unexpected")
         )
 
         service = template["services"][0]
@@ -195,7 +210,7 @@ class AccessStateTests(unittest.TestCase):
         self.assertNotIn("options", template)
         self.assertRegex(
             generated.filename,
-            rf"^rtkey_{re.escape(key)}_[0-9a-f]{{8}}\.json$",
+            r"^rtkey_access_[0-9a-f]{8}\.json$",
         )
 
     def test_duplicate_place_names_get_distinct_stable_labels(self) -> None:
@@ -210,24 +225,30 @@ class AccessStateTests(unittest.TestCase):
             mqtt_device_key(second_point.kind, second_point.point_id),
         )
 
-        generated = build_spruthub_access_templates([first, second], "rtkey")
-        self.assertEqual(len({item.display_name for item in generated}), 2)
-        for item in generated:
-            template = json.loads(item.content)
-            self.assertRegex(item.display_name, r"^Подъезд \[[0-9a-f]{10}\]$")
-            self.assertEqual(template["name"], item.display_name)
-            self.assertEqual(template["manufacturer"], item.display_name)
-            self.assertEqual(template["model"], item.display_name)
-            self.assertEqual(template["services"][0]["name"], item.display_name)
+        generated = build_spruthub_access_template([first, second], "rtkey")
+        self.assertIsNotNone(generated)
+        template = json.loads(generated.content)
+        entry_names = [entry.display_name for entry in generated.entries]
+        self.assertEqual(len(set(entry_names)), 2)
+        for name in entry_names:
+            self.assertRegex(name, r"^Подъезд \[[0-9a-f]{10}\]$")
+        self.assertEqual(
+            [template[field] for field in ("name", "manufacturer", "model")],
+            [generated.display_name] * 3,
+        )
+        self.assertEqual(
+            [service["name"] for service in template["services"]], entry_names
+        )
 
     def test_template_archive_contains_only_generated_json_files(self) -> None:
-        generated = build_spruthub_access_templates([binding()], "rtkey")
-        archive_bytes = build_spruthub_template_archive(generated)
+        generated = build_spruthub_access_template([binding()], "rtkey")
+        self.assertIsNotNone(generated)
+        archive_bytes = build_spruthub_template_archive([generated])
         with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:") as archive:
-            self.assertEqual(archive.getnames(), [generated[0].filename])
-            exported = archive.extractfile(generated[0].filename)
+            self.assertEqual(archive.getnames(), [generated.filename])
+            exported = archive.extractfile(generated.filename)
             self.assertIsNotNone(exported)
-            self.assertEqual(exported.read(), generated[0].content)
+            self.assertEqual(exported.read(), generated.content)
 
 
 if __name__ == "__main__":

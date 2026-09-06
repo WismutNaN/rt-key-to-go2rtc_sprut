@@ -324,9 +324,9 @@ for ((_attempt = 1; _attempt <= 90; _attempt++)); do
             for ((_access_attempt = 1; _access_attempt <= 30; _access_attempt++)); do
                 if ACCESS_OUTPUT="$(docker compose exec -T controller python -m rtkey_gateway access-show 2>/dev/null)"; then
                     printf '\n%s\n' "$ACCESS_OUTPUT"
-                    echo "Creating one named SprutHub template per access device..."
+                    echo "Creating one SprutHub template for all access devices..."
                     ./manage.sh access-templates
-                    echo "Import every generated JSON file into the SprutHub MQTT catalog."
+                    echo "Import the generated JSON file into the SprutHub MQTT catalog."
                     echo "Then restart the SprutHub MQTT controller to discover retained devices."
                     echo "Management: ./manage.sh status | media-status | show | access | access-templates | logs | set-token"
                     exit 0

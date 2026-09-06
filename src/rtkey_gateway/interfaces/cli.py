@@ -34,7 +34,7 @@ from rtkey_gateway.infrastructure.rtkey import (
 from rtkey_gateway.infrastructure.rtsp_probe import Go2RtcRtspProbe
 from rtkey_gateway.infrastructure.secrets import FileAccessTokenSource
 from rtkey_gateway.infrastructure.spruthub_templates import (
-    build_spruthub_access_templates,
+    build_spruthub_access_template,
     build_spruthub_template_archive,
 )
 from rtkey_gateway.interfaces.snapshot_http import SnapshotHttpService
@@ -255,16 +255,17 @@ def command_access_show(container: Container) -> int:
     print(f"Topic prefix: {settings.mqtt_topic_prefix}")
     print("Template export: ./manage.sh access-templates")
     print()
-    templates = {
-        template.mqtt_key: template
-        for template in build_spruthub_access_templates(
-            bindings, settings.mqtt_topic_prefix
-        )
+    template = build_spruthub_access_template(
+        bindings, settings.mqtt_topic_prefix
+    )
+    if template is None:
+        raise GatewayError("No access devices are available for template export")
+    display_names = {
+        entry.mqtt_key: entry.display_name for entry in template.entries
     }
     for binding in bindings:
         point = binding.point
-        template = templates[binding.mqtt_key.value]
-        print(f"Place: {template.display_name}")
+        print(f"Place: {display_names[binding.mqtt_key.value]}")
         print(f"Type: {point.kind.value}")
         print(f"Device ID: {point.point_id.value}")
         if point.camera_id:
@@ -288,13 +289,13 @@ def command_export_access_templates(
     if settings.access_control != "mqtt" or container.access_repository is None:
         raise GatewayError("MQTT access control is disabled")
     state = container.access_repository.load()
-    templates = build_spruthub_access_templates(
+    template = build_spruthub_access_template(
         state.bindings.values(), settings.mqtt_topic_prefix
     )
-    if not templates:
+    if template is None:
         raise GatewayError("No access devices are available for template export")
     target = output if output is not None else sys.stdout.buffer
-    target.write(build_spruthub_template_archive(templates))
+    target.write(build_spruthub_template_archive([template]))
     return 0
 
 
