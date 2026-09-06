@@ -1,0 +1,30 @@
+{
+  "name": "RT Key access",
+  "manufacturer": "Rostelecom",
+  "manufacturerId": "rtkey-gateway",
+  "model": "Access point",
+  "modelId": "rtkey/access/([a-z0-9][a-z0-9_-]{0,63})/state",
+  "status": "Test",
+  "services": [
+    {
+      "name": "Open",
+      "type": "Switch",
+      "characteristics": [
+        {
+          "type": "On",
+          "link": [
+            {
+              "type": "String",
+              "topicGet": "rtkey/access/(1)/state",
+              "topicSet": "rtkey/access/(1)/set",
+              "map": {
+                "false": "OFF",
+                "true": "ON"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

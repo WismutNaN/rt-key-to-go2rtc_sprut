@@ -79,6 +79,8 @@ class InstallSecretTests(unittest.TestCase):
         self.assertIn("VIDEO_RESOLUTIONS=source,1280x720,640x360", env_text)
         self.assertIn("AUDIO_MODE=pcma", env_text)
         self.assertIn("SNAPSHOT_PORT=8080", env_text)
+        self.assertIn("ACCESS_CONTROL=off", env_text)
+        self.assertIn("MQTT_PORT=44444", env_text)
 
     def test_install_writes_file_secret_outside_env(self) -> None:
         self.run_install("Bearer header.payload.signature")

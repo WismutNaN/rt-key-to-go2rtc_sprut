@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Безопасные операции с Docker-развёртыванием.
+# Safe operations for the Docker deployment.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,40 +8,44 @@ source "$ROOT_DIR/scripts/secrets.sh"
 
 usage() {
     cat <<'USAGE'
-Использование: ./manage.sh <команда>
+Usage: ./manage.sh <command>
 
-Команды:
-  show         показать логин, пароль, RTSP и snapshot-ссылки всех камер
-  status       показать контейнеры и безопасный статус controller
-  check-streams глубоко проверить все upstream (временно запускает обработку)
-  logs         безопасные логи controller без upstream URL
-  logs-media   диагностические логи go2rtc/FFmpeg (могут содержать source)
-  refresh      пересоздать только controller и обновить камеры/настройки
-  set-token    заменить Bearer Token и перезапустить только controller
-  up           запустить сервисы
-  down         остановить сервисы, сохранив состояние
+Commands:
+  show          Show credentials, RTSP URLs, and snapshot URLs
+  access        Show MQTT credentials and discovered access devices
+  status        Show containers and sanitized controller state
+  check-streams Actively check every upstream (temporarily starts media)
+  logs          Show controller logs without upstream URLs
+  logs-media    Show go2rtc/FFmpeg logs (may contain source URLs)
+  refresh       Recreate only the controller and refresh cameras/settings
+  set-token     Replace the Bearer Token and restart only the controller
+  up            Start services
+  down          Stop services and preserve state
 USAGE
 }
 
 COMMAND="${1:-}"
 case "$COMMAND" in
     -h|--help|help|"") usage; exit 0 ;;
-    show|status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
+    show|access|status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
     *)
-        echo "Неизвестная команда: $COMMAND" >&2
+        echo "Unknown command: $COMMAND" >&2
         usage
         exit 2
         ;;
 esac
 
 [[ -f .env ]] || {
-    echo "Файл .env отсутствует. Сначала выполните ./install.sh." >&2
+    echo ".env is missing. Run ./install.sh first." >&2
     exit 1
 }
 
 case "$COMMAND" in
     show)
         exec docker compose exec -T controller python -m rtkey_gateway show
+        ;;
+    access)
+        exec docker compose exec -T controller python -m rtkey_gateway access-show
         ;;
     status)
         docker compose ps
@@ -55,28 +59,28 @@ case "$COMMAND" in
         exec docker compose logs -f --tail=200 controller
         ;;
     logs-media)
-        echo "Внимание: go2rtc/FFmpeg может вывести временный upstream URL." >&2
-        echo "Не публикуйте эти логи без проверки и удаления секретов." >&2
+        echo "Warning: go2rtc/FFmpeg may print temporary upstream URLs." >&2
+        echo "Do not publish these logs before reviewing and removing secrets." >&2
         exec docker compose logs -f --tail=200 go2rtc
         ;;
     refresh)
         docker compose up -d --force-recreate --no-deps controller
-        echo "Controller пересоздан; go2rtc и RTSP-сервер не останавливались."
+        echo "Controller recreated; go2rtc and the RTSP server stayed online."
         ;;
     set-token)
         [[ -t 0 ]] || {
-            echo "Для безопасного ввода токена нужен интерактивный терминал." >&2
+            echo "An interactive terminal is required for secure token entry." >&2
             exit 1
         }
-        read -rsp "Новый Bearer Token: " token
+        read -rsp "New Bearer Token: " token
         echo
         if ! token="$(normalize_access_token "$token")"; then
-            echo "Некорректный Bearer Token." >&2
+            echo "Invalid Bearer Token." >&2
             exit 2
         fi
         write_access_token_secret "$token"
         docker compose up -d --force-recreate --no-deps controller
-        echo "Токен заменён. go2rtc продолжал работать без перезапуска."
+        echo "Token replaced. go2rtc stayed online without a restart."
         ;;
     up)
         exec docker compose up -d --build

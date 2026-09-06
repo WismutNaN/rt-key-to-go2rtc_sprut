@@ -1,15 +1,15 @@
 # Модуль: Будущие bounded contexts
 
-**Ответственность**: фиксирует безопасные точки расширения для управления доступом и звонков, не добавляя неиспользуемый код в Video Gateway.
-**Расположение**: будущие `src/rtkey_gateway/access_control/`, `src/rtkey_gateway/intercom_calls/`
+**Ответственность**: фиксирует безопасные точки расширения реализованного управления доступом и будущей обработки звонков.
+**Расположение**: `src/rtkey_gateway/domain/access.py`, будущий `src/rtkey_gateway/intercom_calls/`
 
 ## Публичный интерфейс
 
 | Символ | Тип | Описание |
 |---|---|---|
-| `AccessPointId` | будущий value object | ID домофона, двери или шлагбаума |
-| `OpenAccessPoint` | будущий use case | Явная команда открытия с audit result |
-| `AccessControlProvider` | будущий port | Обнаружение точек доступа и команда open |
+| `AccessPointId` | value object | Реализованный ID домофона, двери или шлагбаума |
+| `AccessControlService` | use case | Реализованные refresh, проверка и команда open |
+| `AccessControlProviderPort` | port | Реализованное обнаружение точек доступа и команда open |
 | `CallSession` | будущий aggregate | Жизненный цикл входящего/исходящего звонка |
 | `CallSignalingPort` | будущий port | События сигнализации независимо от транспорта Ростелекома |
 | `DuplexAudioPort` | будущий port | Двусторонний media channel независимо от go2rtc |
@@ -31,10 +31,8 @@
 
 ## Намеренно НЕ обрабатывает
 
-- Реальную реализацию endpoint открытия в v1.
-- Публикацию кнопки в SprutHub/Home Assistant.
 - Исследование signaling и двустороннего аудио.
 
 ## Заметки для агента
 
-> Публично наблюдавшиеся endpoint домофонов/шлагбаумов и POST открытия подтверждают реализуемость Access Control adapter, но это security-sensitive действие. Перед реализацией нужно определить аутентификацию вызывающего клиента, anti-replay/rate limit и журнал результата. Intercom Calls может потребовать event-driven/async архитектуру; это не причина усложнять текущий видеоконтроллер.
+> Access Control реализован через opt-in MQTT с broker-аутентификацией, anti-replay, cooldown и журналированием результата. Intercom Calls может потребовать event-driven/async архитектуру; это не причина усложнять текущий видеоконтроллер.

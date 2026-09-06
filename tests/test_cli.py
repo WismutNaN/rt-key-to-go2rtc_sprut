@@ -8,14 +8,24 @@ from types import SimpleNamespace
 
 from rtkey_gateway.application.ports import MediaProbeResult
 from rtkey_gateway.domain import (
+    AccessBinding,
+    AccessPoint,
+    AccessPointId,
+    AccessPointKind,
+    AccessState,
     CameraBinding,
     CameraId,
     GatewayState,
     MediaPolicy,
     SecretUrl,
     StreamName,
+    mqtt_device_key,
 )
-from rtkey_gateway.interfaces.cli import command_healthcheck, command_show
+from rtkey_gateway.interfaces.cli import (
+    command_access_show,
+    command_healthcheck,
+    command_show,
+)
 from tests.helpers import MemoryRepository
 
 
@@ -33,7 +43,7 @@ class CliTests(unittest.TestCase):
         with contextlib.redirect_stderr(error):
             result = command_show(container)
         self.assertEqual(result, 2)
-        self.assertIn("не прошли первичную проверку", error.getvalue())
+        self.assertIn("have not passed initial verification", error.getvalue())
 
     def test_show_prints_rtsp_and_snapshot_urls(self) -> None:
         state = GatewayState(
@@ -114,6 +124,39 @@ class CliTests(unittest.TestCase):
             result = command_healthcheck(container)
         self.assertEqual(result, 0)
         self.assertEqual(probe.requested, set())
+
+    def test_access_show_prints_provider_title_and_mqtt_mapping(self) -> None:
+        point = AccessPoint(
+            AccessPointId("door-1"), AccessPointKind.INTERCOM, "Подъезд 1"
+        )
+        binding = AccessBinding(point, mqtt_device_key(point.kind, point.point_id))
+
+        class Repository:
+            def load(self) -> AccessState:
+                return AccessState(
+                    bindings={binding.identity: binding},
+                    last_success_at=100,
+                )
+
+        container = SimpleNamespace(
+            settings=SimpleNamespace(
+                access_control="mqtt",
+                mqtt_host="192.168.50.10",
+                mqtt_port=44_444,
+                mqtt_username="rtkey",
+                mqtt_password="mqtt-password",
+                mqtt_topic_prefix="rtkey",
+            ),
+            access_repository=Repository(),
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = command_access_show(container)
+        self.assertEqual(result, 0)
+        rendered = output.getvalue()
+        self.assertIn("SprutHub MQTT access control", rendered)
+        self.assertIn("Device: Подъезд 1", rendered)
+        self.assertIn(f"MQTT key: {binding.mqtt_key.value}", rendered)
 
 
 if __name__ == "__main__":

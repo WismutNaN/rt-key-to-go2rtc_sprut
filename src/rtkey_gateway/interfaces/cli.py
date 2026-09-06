@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from rtkey_gateway.application.access_control import AccessControlService
 from rtkey_gateway.application.health import evaluate_state
 from rtkey_gateway.application.snapshot import GetCameraSnapshot
 from rtkey_gateway.application.sync_video import SynchronizeVideoFeeds
@@ -20,11 +21,14 @@ from rtkey_gateway.errors import GatewayError
 from rtkey_gateway.infrastructure.clock import SystemClock
 from rtkey_gateway.infrastructure.go2rtc_gateway import Go2RtcMediaGateway
 from rtkey_gateway.infrastructure.http import UrllibTransport
+from rtkey_gateway.infrastructure.json_access_state import JsonAccessStateRepository
 from rtkey_gateway.infrastructure.json_state import JsonVideoStateRepository
+from rtkey_gateway.infrastructure.mqtt_access import MqttAccessEvents
 from rtkey_gateway.infrastructure.rtkey import (
     FallbackVideoCatalog,
     LegacyCameraApiStrategy,
     NewCameraApiStrategy,
+    RtKeyAccessControl,
 )
 from rtkey_gateway.infrastructure.rtsp_probe import Go2RtcRtspProbe
 from rtkey_gateway.infrastructure.secrets import FileAccessTokenSource
@@ -39,6 +43,8 @@ class Container:
     media_probe: Go2RtcRtspProbe
     synchronizer: SynchronizeVideoFeeds
     snapshot_server: SnapshotHttpService
+    access_repository: JsonAccessStateRepository | None = None
+    access_service: AccessControlService | None = None
 
 
 def build_container(settings: Settings) -> Container:
@@ -93,6 +99,38 @@ def build_container(settings: Settings) -> Container:
         GetCameraSnapshot(repository, media_gateway, settings.media_policy),
         workers=settings.snapshot_workers,
     )
+    access_repository: JsonAccessStateRepository | None = None
+    access_service: AccessControlService | None = None
+    if settings.access_control == "mqtt":
+        if (
+            settings.mqtt_host is None
+            or settings.mqtt_username is None
+            or settings.mqtt_password is None
+        ):
+            raise GatewayError("MQTT access control credentials are incomplete")
+        access_repository = JsonAccessStateRepository(settings.access_state_file)
+        access_events = MqttAccessEvents(
+            settings.mqtt_host,
+            settings.mqtt_port,
+            settings.mqtt_username,
+            settings.mqtt_password,
+            topic_prefix=settings.mqtt_topic_prefix,
+            client_id=settings.mqtt_client_id,
+            keepalive=settings.mqtt_keepalive,
+        )
+        access_service = AccessControlService(
+            provider=RtKeyAccessControl(
+                UrllibTransport(),
+                token_source,
+                timeout=float(settings.http_timeout),
+            ),
+            repository=access_repository,
+            events=access_events,
+            clock=SystemClock(),
+            refresh_interval=settings.access_refresh_interval,
+            retry_interval=settings.access_retry_interval,
+            open_cooldown=settings.access_open_cooldown,
+        )
     return Container(
         settings,
         repository,
@@ -100,6 +138,8 @@ def build_container(settings: Settings) -> Container:
         media_probe,
         synchronizer,
         snapshot_server,
+        access_repository,
+        access_service,
     )
 
 
@@ -118,13 +158,13 @@ def command_show(container: Container) -> int:
     state = container.repository.load()
     cameras = [item for item in state.bindings.values() if item.present]
     if not cameras:
-        print("Камеры ещё не обнаружены.", file=sys.stderr)
+        print("No cameras have been discovered yet.", file=sys.stderr)
         return 2
     unverified = [item for item in cameras if item.last_good_upstream is None]
     if unverified:
         names = ", ".join(item.stream_name.value for item in unverified)
         print(
-            f"Потоки ещё не прошли первичную проверку: {names}",
+            f"Streams have not passed initial verification yet: {names}",
             file=sys.stderr,
         )
         return 2
@@ -164,7 +204,55 @@ def command_show(container: Container) -> int:
 
 
 def command_status(container: Container) -> int:
-    print(json.dumps(container.repository.sanitized(), ensure_ascii=False, indent=2))
+    status = container.repository.sanitized()
+    status["access_control"] = (
+        container.access_repository.sanitized()
+        if container.access_repository is not None
+        else {"enabled": False}
+    )
+    print(json.dumps(status, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_access_show(container: Container) -> int:
+    settings = container.settings
+    if settings.access_control != "mqtt" or container.access_repository is None:
+        print("Access control: disabled")
+        return 0
+    state = container.access_repository.load()
+    if state.last_success_at is None:
+        print("Access devices have not been discovered yet.", file=sys.stderr)
+        return 2
+
+    print("==========================================")
+    print("SprutHub MQTT access control")
+    print("==========================================")
+    print(f"Broker: {settings.mqtt_host}:{settings.mqtt_port}")
+    print(f"Username: {settings.mqtt_username}")
+    print(f"Password: {settings.mqtt_password}")
+    print(f"Topic prefix: {settings.mqtt_topic_prefix}")
+    print("Template: spruthub/rtkey_access.json")
+    print()
+    bindings = sorted(
+        (binding for binding in state.bindings.values() if binding.present),
+        key=lambda item: item.mqtt_key.value,
+    )
+    if not bindings:
+        print("No intercoms or barriers are available for this account.")
+    for binding in bindings:
+        point = binding.point
+        print(f"Device: {point.title}")
+        print(f"Type: {point.kind.value}")
+        print(f"Device ID: {point.point_id.value}")
+        if point.camera_id:
+            print(f"Camera ID: {point.camera_id}")
+        print(f"MQTT key: {binding.mqtt_key.value}")
+        print(
+            "Command topic: "
+            f"{settings.mqtt_topic_prefix}/access/{binding.mqtt_key.value}/set"
+        )
+        print()
+    print("==========================================")
     return 0
 
 
@@ -223,9 +311,30 @@ def command_run(container: Container) -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     container.snapshot_server.start()
+    access_thread: threading.Thread | None = None
+    if container.access_service is not None:
+        access_service = container.access_service
+
+        def run_access() -> None:
+            try:
+                access_service.run(stop_event)
+            except Exception:  # keep the independent video context alive
+                logging.getLogger(__name__).exception(
+                    "Access control worker stopped unexpectedly"
+                )
+
+        access_thread = threading.Thread(
+            target=run_access,
+            name="access-control",
+            daemon=True,
+        )
+        access_thread.start()
     try:
         container.synchronizer.run(stop_event)
     finally:
+        stop_event.set()
+        if access_thread is not None:
+            access_thread.join(timeout=10.0)
         container.snapshot_server.stop()
     return 0
 
@@ -238,6 +347,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "run",
             "sync-once",
             "show",
+            "access-show",
             "status",
             "healthcheck",
             "deep-healthcheck",
@@ -258,12 +368,13 @@ def main(argv: list[str] | None = None) -> int:
             "run": command_run,
             "sync-once": command_sync_once,
             "show": command_show,
+            "access-show": command_access_show,
             "status": command_status,
             "healthcheck": command_healthcheck,
             "deep-healthcheck": command_deep_healthcheck,
         }[command](container)
     except GatewayError as exc:
-        print(f"Ошибка: {exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
 

@@ -15,7 +15,7 @@ API Ростелекома уже изменил endpoint и форму поле
 
 ## Решение
 
-Выбрали **модульный controller с dependency rule `domain ← application ← infrastructure/interfaces`**. В v1 реализуется только bounded context Video Gateway. Источник Bearer Token, часы и типизированные ошибки образуют минимальный shared kernel, доступный всем слоям. Access Control и Intercom Calls документируются как отдельные контексты и не добавляют optional-методы в видеоинтерфейсы. Изменения API поглощаются strategy-adapters и anti-corruption mapping.
+Выбрали **модульный controller с dependency rule `domain ← application ← infrastructure/interfaces`**. Video Gateway и opt-in Access Control реализуются как независимые bounded contexts в одном процессе; Intercom Calls остаётся отдельным будущим контекстом. Источник Bearer Token, часы и типизированные ошибки образуют минимальный shared kernel. Изменения API поглощаются strategy-adapters и anti-corruption mapping.
 
 ## Последствия
 

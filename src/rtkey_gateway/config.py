@@ -37,8 +37,10 @@ def _password(env: dict[str, str], name: str) -> str:
     return value
 
 
-def _server_host(env: dict[str, str]) -> str:
-    value = (env.get("SERVER_IP", "127.0.0.1").strip() or "127.0.0.1")
+def _host(env: dict[str, str], name: str, default: str = "") -> str:
+    value = env.get(name, default).strip() or default
+    if not value:
+        raise ValidationError(f"Required environment variable {name} is empty")
     candidate = value[1:-1] if value.startswith("[") and value.endswith("]") else value
     try:
         ipaddress.ip_address(candidate)
@@ -48,7 +50,7 @@ def _server_host(env: dict[str, str]) -> str:
             r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
             candidate,
         ):
-            raise ValidationError("SERVER_IP must be an IPv4, IPv6 or DNS host")
+            raise ValidationError(f"{name} must be an IPv4, IPv6 or DNS host")
     return candidate
 
 
@@ -96,6 +98,18 @@ class Settings:
     runtime_check_interval: int
     health_max_stale: int
     log_level: str
+    access_control: str
+    access_state_file: str
+    access_refresh_interval: int
+    access_retry_interval: int
+    access_open_cooldown: int
+    mqtt_host: str | None
+    mqtt_port: int
+    mqtt_username: str | None
+    mqtt_password: str | None = field(repr=False)
+    mqtt_topic_prefix: str
+    mqtt_client_id: str
+    mqtt_keepalive: int
 
     @classmethod
     def from_env(cls, source: dict[str, str] | None = None) -> "Settings":
@@ -153,6 +167,30 @@ class Settings:
         if snapshot_workers > 16:
             raise ValidationError("SNAPSHOT_WORKERS cannot be greater than 16")
 
+        access_control = env.get("ACCESS_CONTROL", "off").strip().lower() or "off"
+        if access_control not in {"off", "mqtt"}:
+            raise ValidationError("ACCESS_CONTROL must be off or mqtt")
+        mqtt_host: str | None = None
+        mqtt_username: str | None = None
+        mqtt_password: str | None = None
+        if access_control == "mqtt":
+            mqtt_host = _host(env, "MQTT_HOST")
+            mqtt_username = _username(env, "MQTT_USERNAME")
+            mqtt_password = _password(env, "MQTT_PASSWORD")
+        topic_prefix = (
+            env.get("MQTT_TOPIC_PREFIX", "rtkey").strip().rstrip("/").lower()
+        )
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9/_-]{0,127}", topic_prefix)
+            or "//" in topic_prefix
+        ):
+            raise ValidationError(
+                "MQTT_TOPIC_PREFIX must contain only topic-safe ASCII characters"
+            )
+        mqtt_client_id = env.get("MQTT_CLIENT_ID", "rtkey-gateway").strip()
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", mqtt_client_id):
+            raise ValidationError("MQTT_CLIENT_ID contains unsupported characters")
+
         return cls(
             access_token_file=env.get(
                 "ACCESS_TOKEN_FILE", "/run/secrets/rtkey_access_token"
@@ -161,7 +199,7 @@ class Settings:
             go2rtc_url=env.get("GO2RTC_URL", "http://go2rtc:1984"),
             go2rtc_api_username=_username(env, "GO2RTC_API_USERNAME"),
             go2rtc_api_password=_password(env, "GO2RTC_API_PASSWORD"),
-            rtsp_host=_server_host(env),
+            rtsp_host=_host(env, "SERVER_IP", "127.0.0.1"),
             rtsp_port=_port(env, "RTSP_PORT", 8554),
             rtsp_username=_username(env, "RTSP_USERNAME"),
             rtsp_password=_password(env, "RTSP_PASSWORD"),
@@ -191,4 +229,20 @@ class Settings:
             ),
             health_max_stale=_positive_int(env, "HEALTH_MAX_STALE_SECONDS", 21_600),
             log_level=env.get("LOG_LEVEL", "INFO").upper(),
+            access_control=access_control,
+            access_state_file=env.get("ACCESS_STATE_FILE", "/data/access.json"),
+            access_refresh_interval=_positive_int(
+                env, "ACCESS_REFRESH_SECONDS", 3_600
+            ),
+            access_retry_interval=_positive_int(env, "ACCESS_RETRY_SECONDS", 60),
+            access_open_cooldown=_positive_int(
+                env, "ACCESS_OPEN_COOLDOWN_SECONDS", 5
+            ),
+            mqtt_host=mqtt_host,
+            mqtt_port=_port(env, "MQTT_PORT", 44_444),
+            mqtt_username=mqtt_username,
+            mqtt_password=mqtt_password,
+            mqtt_topic_prefix=topic_prefix,
+            mqtt_client_id=mqtt_client_id,
+            mqtt_keepalive=_positive_int(env, "MQTT_KEEPALIVE_SECONDS", 60),
         )

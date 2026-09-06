@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Быстрый и повторяемый запуск RT Key -> go2rtc через Docker Compose.
+# Fast, repeatable RT Key -> go2rtc deployment with Docker Compose.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,33 +33,44 @@ VIDEO_FPS="${VIDEO_FPS:-$(read_env VIDEO_FPS)}"
 VIDEO_FPS="${VIDEO_FPS:-30}"
 VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-$(read_env VIDEO_RESOLUTIONS)}"
 VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-source,1280x720,640x360}"
+ACCESS_CONTROL="${ACCESS_CONTROL:-$(read_env ACCESS_CONTROL)}"
+ACCESS_CONTROL="${ACCESS_CONTROL:-off}"
+MQTT_HOST="${MQTT_HOST:-$(read_env MQTT_HOST)}"
+MQTT_PORT="${MQTT_PORT:-$(read_env MQTT_PORT)}"
+MQTT_PORT="${MQTT_PORT:-44444}"
+MQTT_USERNAME="${MQTT_USERNAME:-$(read_env MQTT_USERNAME)}"
+MQTT_PASSWORD="${MQTT_PASSWORD:-$(read_env MQTT_PASSWORD)}"
 
 usage() {
     cat <<'USAGE'
-Использование: ./install.sh [опции]
+Usage: ./install.sh [options]
 
-Опции:
-  --token <TOKEN>       Bearer Token Ростелеком Ключ
-  --server-ip <IP>      IP сервера, который увидит SprutHub
-  --rtsp-port <PORT>    внешний RTSP-порт (по умолчанию 8554)
-  --snapshot-port <PORT> внешний HTTP snapshot-порт (по умолчанию 8080)
-  --snapshot-workers <N> не более N одновременных снимков (по умолчанию 2)
-  --probe-workers <N>  параллельные первичные проверки (по умолчанию 1)
-  --audio <MODE>        copy|aac|pcma|pcmu|none (по умолчанию pcma)
-  --video <MODE>        h264|copy (по умолчанию стабильный h264)
-  --fps <N>             частота стабильных H.264-вариантов, 1..60
-  --resolutions <LIST>  source,1280x720,640x360 (от одного до четырёх)
-  -h, --help            показать справку
+Options:
+  --token <TOKEN>        Rostelecom Key Bearer Token
+  --server-ip <IP>       Server IP visible to SprutHub
+  --rtsp-port <PORT>     Published RTSP port (default: 8554)
+  --snapshot-port <PORT> Published HTTP snapshot port (default: 8080)
+  --snapshot-workers <N> Maximum concurrent snapshots (default: 2)
+  --probe-workers <N>    Concurrent initial stream checks (default: 1)
+  --audio <MODE>         copy|aac|pcma|pcmu|none (default: pcma)
+  --video <MODE>         h264|copy (default: stable h264)
+  --fps <N>              Stable H.264 frame rate, 1..60
+  --resolutions <LIST>   source,1280x720,640x360 (one to four variants)
+  --access-control <MODE> off|mqtt (default: off)
+  --mqtt-host <HOST>     SprutHub LAN address when MQTT access is enabled
+  --mqtt-port <PORT>     SprutHub MQTT port (default: 44444)
+  --mqtt-user <USER>     SprutHub MQTT broker username
+  --mqtt-password <PASS> SprutHub MQTT broker password
+  -h, --help             Show this help
 
-Также поддерживаются ACCESS_TOKEN, SERVER_IP, RTSP_PORT, SNAPSHOT_PORT,
-AUDIO_MODE, VIDEO_MODE и VIDEO_RESOLUTIONS.
-Docker Engine и команда "docker compose" должны быть установлены заранее.
+The matching environment variables are also supported.
+Docker Engine and the "docker compose" command must already be installed.
 USAGE
 }
 
 require_value() {
     if (( $# < 2 )) || [[ -z "$2" ]]; then
-        echo "Для $1 требуется непустое значение." >&2
+        echo "$1 requires a non-empty value." >&2
         exit 2
     fi
 }
@@ -86,37 +97,51 @@ while [[ $# -gt 0 ]]; do
         --fps=*) VIDEO_FPS="${1#*=}"; shift ;;
         --resolutions) require_value "$@"; VIDEO_RESOLUTIONS="$2"; shift 2 ;;
         --resolutions=*) VIDEO_RESOLUTIONS="${1#*=}"; shift ;;
+        --access-control) require_value "$@"; ACCESS_CONTROL="$2"; shift 2 ;;
+        --access-control=*) ACCESS_CONTROL="${1#*=}"; shift ;;
+        --mqtt-host) require_value "$@"; MQTT_HOST="$2"; shift 2 ;;
+        --mqtt-host=*) MQTT_HOST="${1#*=}"; shift ;;
+        --mqtt-port) require_value "$@"; MQTT_PORT="$2"; shift 2 ;;
+        --mqtt-port=*) MQTT_PORT="${1#*=}"; shift ;;
+        --mqtt-user) require_value "$@"; MQTT_USERNAME="$2"; shift 2 ;;
+        --mqtt-user=*) MQTT_USERNAME="${1#*=}"; shift ;;
+        --mqtt-password) require_value "$@"; MQTT_PASSWORD="$2"; shift 2 ;;
+        --mqtt-password=*) MQTT_PASSWORD="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
-        *) echo "Неизвестный аргумент: $1" >&2; usage; exit 2 ;;
+        *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
     esac
 done
 
 command -v docker >/dev/null 2>&1 || {
-    echo "Docker не найден. Сначала установите Docker Engine." >&2
+    echo "Docker was not found. Install Docker Engine first." >&2
     exit 1
 }
 docker compose version >/dev/null 2>&1 || {
-    echo "Не найдена команда 'docker compose'. Установите Compose plugin." >&2
+    echo "The 'docker compose' command was not found. Install the Compose plugin." >&2
     exit 1
 }
 
 case "$AUDIO_MODE" in
     copy|aac|pcma|pcmu|none) ;;
-    *) echo "Неверный audio mode: $AUDIO_MODE" >&2; exit 2 ;;
+    *) echo "Invalid audio mode: $AUDIO_MODE" >&2; exit 2 ;;
 esac
 case "$VIDEO_MODE" in
     h264|copy) ;;
-    *) echo "Неверный video mode: $VIDEO_MODE" >&2; exit 2 ;;
+    *) echo "Invalid video mode: $VIDEO_MODE" >&2; exit 2 ;;
+esac
+case "$ACCESS_CONTROL" in
+    off|mqtt) ;;
+    *) echo "Invalid access control mode: $ACCESS_CONTROL" >&2; exit 2 ;;
 esac
 [[ "$VIDEO_RESOLUTIONS" =~ ^source(,[0-9]+x[0-9]+){0,3}$ ]] || {
-    echo "Разрешения: source и до трёх значений WIDTHxHEIGHT через запятую." >&2
+    echo "Resolutions must be source followed by up to three WIDTHxHEIGHT values." >&2
     exit 2
 }
 IFS=',' read -r -a RESOLUTION_ITEMS <<< "$VIDEO_RESOLUTIONS"
 declare -A SEEN_RESOLUTIONS=()
 for RESOLUTION_ITEM in "${RESOLUTION_ITEMS[@]}"; do
     [[ -z "${SEEN_RESOLUTIONS[$RESOLUTION_ITEM]:-}" ]] || {
-        echo "Разрешения не должны повторяться." >&2
+        echo "Resolution values must be unique." >&2
         exit 2
     }
     SEEN_RESOLUTIONS[$RESOLUTION_ITEM]=1
@@ -125,33 +150,37 @@ for RESOLUTION_ITEM in "${RESOLUTION_ITEMS[@]}"; do
     HEIGHT="${RESOLUTION_ITEM#*x}"
     (( WIDTH >= 160 && WIDTH <= 3840 && HEIGHT >= 90 && HEIGHT <= 2160 \
         && WIDTH % 2 == 0 && HEIGHT % 2 == 0 )) || {
-        echo "Разрешение $RESOLUTION_ITEM должно быть чётным и в диапазоне 160x90..3840x2160." >&2
+        echo "Resolution $RESOLUTION_ITEM must use even dimensions in the 160x90..3840x2160 range." >&2
         exit 2
     }
 done
 [[ "$RTSP_PORT" =~ ^[0-9]+$ ]] && (( RTSP_PORT >= 1 && RTSP_PORT <= 65535 )) || {
-    echo "RTSP-порт должен быть числом от 1 до 65535." >&2
+    echo "RTSP port must be a number from 1 to 65535." >&2
     exit 2
 }
 [[ "$SNAPSHOT_PORT" =~ ^[0-9]+$ ]] \
     && (( SNAPSHOT_PORT >= 1 && SNAPSHOT_PORT <= 65535 )) || {
-    echo "Snapshot-порт должен быть числом от 1 до 65535." >&2
+    echo "Snapshot port must be a number from 1 to 65535." >&2
+    exit 2
+}
+[[ "$MQTT_PORT" =~ ^[0-9]+$ ]] && (( MQTT_PORT >= 1 && MQTT_PORT <= 65535 )) || {
+    echo "MQTT port must be a number from 1 to 65535." >&2
     exit 2
 }
 
 if [[ -z "$ACCESS_TOKEN" ]]; then
     [[ -t 0 ]] || {
-        echo "Передайте токен через --token или ACCESS_TOKEN." >&2
+        echo "Provide a token with --token or ACCESS_TOKEN." >&2
         exit 1
     }
-    echo "Получите Bearer Token в браузере:"
+    echo "Get the Bearer Token in your browser:"
     echo "  https://key.rt.ru/main/pwa/dashboard"
-    echo "  F12 -> Network -> запрос barrier -> Authorization: Bearer ..."
-    read -rsp "Вставьте Bearer Token: " ACCESS_TOKEN
+    echo "  F12 -> Network -> barrier request -> Authorization: Bearer ..."
+    read -rsp "Paste the Bearer Token: " ACCESS_TOKEN
     echo
 fi
 if ! ACCESS_TOKEN="$(normalize_access_token "$ACCESS_TOKEN")"; then
-    echo "Bearer Token пуст или содержит символы, недопустимые для JWT." >&2
+    echo "Bearer Token is empty or contains characters that are invalid for a JWT." >&2
     exit 2
 fi
 
@@ -166,13 +195,50 @@ if [[ -z "$SERVER_IP" ]]; then
     SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 fi
 [[ -n "$SERVER_IP" ]] || {
-    echo "Не удалось определить IP сервера. Укажите --server-ip." >&2
+    echo "Could not detect the server IP. Specify --server-ip." >&2
     exit 1
 }
 [[ "$SERVER_IP" =~ ^[A-Za-z0-9._:-]+$ ]] || {
-    echo "SERVER_IP содержит недопустимые символы." >&2
+    echo "SERVER_IP contains invalid characters." >&2
     exit 2
 }
+
+if [[ "$ACCESS_CONTROL" == mqtt ]]; then
+    if [[ -z "$MQTT_HOST" ]]; then
+        [[ -t 0 ]] || {
+            echo "MQTT_HOST is required when access control is enabled." >&2
+            exit 1
+        }
+        read -rp "SprutHub LAN address: " MQTT_HOST
+    fi
+    if [[ -z "$MQTT_USERNAME" ]]; then
+        [[ -t 0 ]] || {
+            echo "MQTT_USERNAME is required when access control is enabled." >&2
+            exit 1
+        }
+        read -rp "SprutHub MQTT username: " MQTT_USERNAME
+    fi
+    if [[ -z "$MQTT_PASSWORD" ]]; then
+        [[ -t 0 ]] || {
+            echo "MQTT_PASSWORD is required when access control is enabled." >&2
+            exit 1
+        }
+        read -rsp "SprutHub MQTT password: " MQTT_PASSWORD
+        echo
+    fi
+    [[ "$MQTT_HOST" =~ ^[A-Za-z0-9._:-]+$ ]] || {
+        echo "MQTT_HOST contains invalid characters." >&2
+        exit 2
+    }
+    [[ "$MQTT_USERNAME" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || {
+        echo "MQTT username contains unsupported characters." >&2
+        exit 2
+    }
+    [[ "$MQTT_PASSWORD" =~ ^[A-Za-z0-9._-]{8,128}$ ]] || {
+        echo "MQTT password must be 8-128 safe ASCII characters." >&2
+        exit 2
+    }
+fi
 
 RTSP_USERNAME="$(read_env RTSP_USERNAME)"
 RTSP_USERNAME="${RTSP_USERNAME:-spruthub}"
@@ -187,12 +253,12 @@ RTSP_BIND_IP="${RTSP_BIND_IP:-0.0.0.0}"
 SNAPSHOT_BIND_IP="$(read_env SNAPSHOT_BIND_IP)"
 SNAPSHOT_BIND_IP="${SNAPSHOT_BIND_IP:-$RTSP_BIND_IP}"
 if [[ "$SNAPSHOT_BIND_IP" == "$RTSP_BIND_IP" && "$SNAPSHOT_PORT" == "$RTSP_PORT" ]]; then
-    echo "RTSP и snapshot не могут использовать один host-порт на одном IP." >&2
+    echo "RTSP and snapshot cannot use the same host port on the same IP." >&2
     exit 2
 fi
 [[ "$SNAPSHOT_WORKERS" =~ ^[0-9]+$ ]] \
     && (( SNAPSHOT_WORKERS >= 1 && SNAPSHOT_WORKERS <= 16 )) || {
-    echo "SNAPSHOT_WORKERS должен быть числом от 1 до 16." >&2
+    echo "SNAPSHOT_WORKERS must be a number from 1 to 16." >&2
     exit 2
 }
 AUDIO_OVERRIDES_JSON="$(read_env AUDIO_OVERRIDES_JSON)"
@@ -200,7 +266,7 @@ if [[ -z "$AUDIO_OVERRIDES_JSON" ]]; then
     AUDIO_OVERRIDES_JSON='{}'
 fi
 [[ "$VIDEO_FPS" =~ ^[0-9]+$ ]] && (( VIDEO_FPS >= 1 && VIDEO_FPS <= 60 )) || {
-    echo "VIDEO_FPS должен быть числом от 1 до 60." >&2
+    echo "VIDEO_FPS must be a number from 1 to 60." >&2
     exit 2
 }
 VIDEO_OVERRIDES_JSON="$(read_env VIDEO_OVERRIDES_JSON)"
@@ -215,7 +281,7 @@ RTSP_PROBE_TIMEOUT_SECONDS="$(read_env RTSP_PROBE_TIMEOUT_SECONDS)"
 RTSP_PROBE_TIMEOUT_SECONDS="${RTSP_PROBE_TIMEOUT_SECONDS:-12}"
 [[ "$RTSP_PROBE_WORKERS" =~ ^[0-9]+$ ]] \
     && (( RTSP_PROBE_WORKERS >= 1 && RTSP_PROBE_WORKERS <= 32 )) || {
-    echo "RTSP_PROBE_WORKERS должен быть числом от 1 до 32." >&2
+    echo "RTSP_PROBE_WORKERS must be a number from 1 to 32." >&2
     exit 2
 }
 REFRESH_MARGIN_SECONDS="$(read_env REFRESH_MARGIN_SECONDS)"
@@ -230,6 +296,18 @@ RUNTIME_CHECK_SECONDS="$(read_env RUNTIME_CHECK_SECONDS)"
 RUNTIME_CHECK_SECONDS="${RUNTIME_CHECK_SECONDS:-60}"
 HEALTH_MAX_STALE_SECONDS="$(read_env HEALTH_MAX_STALE_SECONDS)"
 HEALTH_MAX_STALE_SECONDS="${HEALTH_MAX_STALE_SECONDS:-21600}"
+ACCESS_REFRESH_SECONDS="$(read_env ACCESS_REFRESH_SECONDS)"
+ACCESS_REFRESH_SECONDS="${ACCESS_REFRESH_SECONDS:-3600}"
+ACCESS_RETRY_SECONDS="$(read_env ACCESS_RETRY_SECONDS)"
+ACCESS_RETRY_SECONDS="${ACCESS_RETRY_SECONDS:-60}"
+ACCESS_OPEN_COOLDOWN_SECONDS="$(read_env ACCESS_OPEN_COOLDOWN_SECONDS)"
+ACCESS_OPEN_COOLDOWN_SECONDS="${ACCESS_OPEN_COOLDOWN_SECONDS:-5}"
+MQTT_TOPIC_PREFIX="$(read_env MQTT_TOPIC_PREFIX)"
+MQTT_TOPIC_PREFIX="${MQTT_TOPIC_PREFIX:-rtkey}"
+MQTT_CLIENT_ID="$(read_env MQTT_CLIENT_ID)"
+MQTT_CLIENT_ID="${MQTT_CLIENT_ID:-rtkey-gateway}"
+MQTT_KEEPALIVE_SECONDS="$(read_env MQTT_KEEPALIVE_SECONDS)"
+MQTT_KEEPALIVE_SECONDS="${MQTT_KEEPALIVE_SECONDS:-60}"
 LOG_LEVEL="$(read_env LOG_LEVEL)"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 TIMEZONE="$(read_env TZ)"
@@ -267,31 +345,59 @@ RETRY_MIN_SECONDS=$RETRY_MIN_SECONDS
 RETRY_MAX_SECONDS=$RETRY_MAX_SECONDS
 RUNTIME_CHECK_SECONDS=$RUNTIME_CHECK_SECONDS
 HEALTH_MAX_STALE_SECONDS=$HEALTH_MAX_STALE_SECONDS
+ACCESS_CONTROL=$ACCESS_CONTROL
+ACCESS_REFRESH_SECONDS=$ACCESS_REFRESH_SECONDS
+ACCESS_RETRY_SECONDS=$ACCESS_RETRY_SECONDS
+ACCESS_OPEN_COOLDOWN_SECONDS=$ACCESS_OPEN_COOLDOWN_SECONDS
+MQTT_HOST=$MQTT_HOST
+MQTT_PORT=$MQTT_PORT
+MQTT_USERNAME=$MQTT_USERNAME
+MQTT_PASSWORD=$MQTT_PASSWORD
+MQTT_TOPIC_PREFIX=$MQTT_TOPIC_PREFIX
+MQTT_CLIENT_ID=$MQTT_CLIENT_ID
+MQTT_KEEPALIVE_SECONDS=$MQTT_KEEPALIVE_SECONDS
 LOG_LEVEL=$LOG_LEVEL
 EOF
 chmod 600 "$ENV_TMP"
 mv -f -- "$ENV_TMP" .env
 trap - EXIT
 
-echo "Проверяю конфигурацию Docker Compose..."
+echo "Validating the Docker Compose configuration..."
 docker compose config --quiet
 
-echo "Собираю controller и запускаю сервисы..."
+echo "Building the controller and starting services..."
 docker compose up -d --build go2rtc
 docker compose up -d --build --force-recreate --no-deps controller
 
-echo "Ожидаю первый проверенный список камер..."
+echo "Waiting for the first verified camera list..."
 OUTPUT=""
 for ((_attempt = 1; _attempt <= 90; _attempt++)); do
     if OUTPUT="$(docker compose exec -T controller python -m rtkey_gateway show 2>/dev/null)"; then
         printf '\n%s\n' "$OUTPUT"
-        echo "Управление: ./manage.sh status | show | logs | set-token"
+        if [[ "$ACCESS_CONTROL" == mqtt ]]; then
+            echo "Waiting for the access device catalog..."
+            ACCESS_OUTPUT=""
+            for ((_access_attempt = 1; _access_attempt <= 30; _access_attempt++)); do
+                if ACCESS_OUTPUT="$(docker compose exec -T controller python -m rtkey_gateway access-show 2>/dev/null)"; then
+                    printf '\n%s\n' "$ACCESS_OUTPUT"
+                    echo "Import spruthub/rtkey_access.json into the SprutHub MQTT catalog."
+                    echo "Then restart the SprutHub MQTT controller to discover retained devices."
+                    echo "Management: ./manage.sh status | show | access | logs | set-token"
+                    exit 0
+                fi
+                sleep 2
+            done
+            echo "Cameras are ready, but access devices were not discovered within 60 seconds." >&2
+            echo "Check: ./manage.sh status && ./manage.sh logs" >&2
+            exit 1
+        fi
+        echo "Management: ./manage.sh status | show | access | logs | set-token"
         exit 0
     fi
     sleep 2
 done
 
-echo "Контейнеры запущены, но камеры не прошли проверку за 180 секунд." >&2
-echo "Проверьте: ./manage.sh status && ./manage.sh logs" >&2
+echo "Containers are running, but cameras were not verified within 180 seconds." >&2
+echo "Check: ./manage.sh status && ./manage.sh logs" >&2
 docker compose ps
 exit 1

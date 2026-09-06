@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Общий file-based store для основного Bearer Token.
+# Shared file-based store for the main Bearer Token.
 
 SECRET_DIR="$ROOT_DIR/secrets"
 ACCESS_TOKEN_FILE="$SECRET_DIR/rtkey_access_token"

@@ -10,6 +10,8 @@ RUN addgroup -S -g 10001 gateway \
     && chown -R gateway:gateway /app /data
 
 WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --requirement /app/requirements.txt
 COPY --chown=gateway:gateway src/ /app/src/
 
 USER gateway

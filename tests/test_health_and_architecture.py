@@ -129,6 +129,10 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn('listen: ""', config)
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("FROM python:3.12.14-alpine3.24", dockerfile)
+        self.assertIn("--requirement /app/requirements.txt", dockerfile)
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("paho-mqtt==2.1.0", requirements)
+        self.assertNotIn("44444:44444", compose)
 
     def test_runtime_secrets_are_ignored_but_static_config_is_not(self) -> None:
         patterns = (ROOT / ".gitignore").read_text(encoding="utf-8")

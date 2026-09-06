@@ -1,4 +1,17 @@
-"""Pure domain model for the Video Gateway bounded context."""
+"""Pure domain models for the gateway bounded contexts."""
+
+from .access import (
+    AccessBinding,
+    AccessCatalogSnapshot,
+    AccessPoint,
+    AccessPointId,
+    AccessPointKind,
+    AccessState,
+    MqttDeviceKey,
+    access_bindings_by_key,
+    mqtt_device_key,
+    reconcile_access_state,
+)
 
 from .media import (
     AudioMode,
@@ -20,6 +33,12 @@ from .video import (
 )
 
 __all__ = [
+    "AccessBinding",
+    "AccessCatalogSnapshot",
+    "AccessPoint",
+    "AccessPointId",
+    "AccessPointKind",
+    "AccessState",
     "AudioMode",
     "AudioPolicy",
     "CameraBinding",
@@ -30,8 +49,12 @@ __all__ = [
     "MediaPolicy",
     "MediaResolution",
     "MediaVariant",
+    "MqttDeviceKey",
     "SecretUrl",
     "StreamName",
     "StreamNamingPolicy",
     "VideoMode",
+    "access_bindings_by_key",
+    "mqtt_device_key",
+    "reconcile_access_state",
 ]

@@ -5,7 +5,7 @@
 ```text
 ┌──────────────────────────┐        HTTPS        ┌───────────────────────────┐
 │ API «Ростелеком Ключ»    │◄────────────────────│ controller                │
-│ новый API + старый API   │                     │ обнаружение и refresh     │
+│ video + access API       │                     │ video/access workers      │
 └─────────────┬────────────┘                     └─────────────┬─────────────┘
               │ временный HTTPS-поток                          │ Basic Auth
               │                                               │ PATCH /api/streams
@@ -19,7 +19,7 @@
                                                               ▼
                                                 ┌───────────────────────────┐
                                                 │ SprutHub                  │
-                                                │ постоянные имена по title │
+                                                │ RTSP, snapshot, MQTT      │
                                                 └───────────────────────────┘
 ```
 
@@ -27,6 +27,9 @@
 `8554/tcp` и узкий HTTP snapshot endpoint `8080/tcp`, оба с credentials
 SprutHub. Порт API `1984` доступен контейнеру `controller` по внутреннему имени
 `go2rtc`, но не публикуется на интерфейсах сервера.
+При `ACCESS_CONTROL=mqtt` controller дополнительно устанавливает исходящее
+соединение с broker SprutHub `44444/tcp`; новый входящий порт на Docker-сервере
+не появляется.
 
 ## Компоненты
 
@@ -44,6 +47,9 @@ SprutHub. Порт API `1984` доступен контейнеру `controller`
 | RTSP probe | Проверяет сервер через OPTIONS или явно будит upstream через DESCRIBE | `probe()` |
 | Snapshot interface | Отдаёт только JPEG проверенных камер с Basic Auth | `GET /snapshot/<name>.jpg` |
 | Установщик | Получает секреты и печатает RTSP/snapshot-ссылки | `./install.sh`, `./manage.sh show` |
+| Access control service | Независимо обновляет intercom/barrier и сериализует open | `refresh_once()`, `handle_command()` |
+| Access API adapter | Нормализует две категории устройств и выполняет open | `fetch_access_points()`, `open_access_point()` |
+| MQTT adapter | Retained discovery, reconnect и momentary Switch | `rtkey/access/+/state`, `rtkey/access/+/set` |
 
 ## DDD-границы и правило зависимостей
 
@@ -79,7 +85,11 @@ domain ← application ← infrastructure/interfaces
 
 ### Bounded context: Access Control
 
-Зарезервирован для будущего. Будет владеть `AccessPointId`, `AccessPoint`, командой `OpenAccessPoint` и отдельным `AccessControlProvider` port. Домофоны и шлагбаумы Ростелекома будут адаптированы из `household.../intercom`, `household.../barrier` и команды открытия, но не попадут в `VideoCatalogPort`.
+Реализован как opt-in worker внутри controller. Владеет `AccessPointId`,
+`AccessPoint`, `AccessBinding`, одноразовой командой открытия и отдельными
+`AccessControlProviderPort`/`AccessEventPort`. Домофоны и шлагбаумы адаптируются
+из `household.../intercom`, `household.../barrier` и `POST .../{id}/open`, не
+попадая в `VideoCatalogPort`. MQTT и JSON остаются infrastructure adapters.
 
 ### Bounded context: Intercom Calls
 
@@ -98,7 +108,7 @@ Shared kernel намеренно минимален и реализован в `
    передаётся. Файл имеет mode `0444`, потому что локальный Compose использует
    bind mount и не меняет владельца под UID `10001`; закрытый родительский
    каталог не позволяет другим host-пользователям прочитать его.
-2. Установщик генерирует отдельные случайные пароли для RTSP и внутреннего API go2rtc.
+2. Установщик генерирует отдельные случайные пароли для RTSP и внутреннего API go2rtc. Если выбран MQTT, он также сохраняет адрес и credentials broker SprutHub в закрытом `.env`; Bearer Token в SprutHub не передаётся.
 3. Docker Compose запускает `go2rtc` с пустым набором `streams`, RTSP-аутентификацией и API без публикации порта на хост.
 4. `controller` ждёт готовности API go2rtc.
 5. Если существует last-known-good с ещё действующими streamer-токенами, контроллер восстанавливает эти runtime-streams.
@@ -128,6 +138,14 @@ Shared kernel намеренно минимален и реализован в `
     media. Полный `DESCRIBE` всех камер выполняется только явной командой
     `./manage.sh check-streams`.
 19. Между обновлениями токенов controller раз в минуту сверяет runtime-имена; после отдельного restart go2rtc пропавшие потоки восстанавливаются из ещё действующего LKG без вызова Ростелеком API.
+20. При включённом MQTT access worker независимо получает списки `intercom` и
+    `barrier`, сохраняя стабильный MQTT key по type/provider ID. Частичный ответ
+    обновляет только успешно полученную категорию.
+21. MQTT adapter публикует retained `OFF` и metadata каждого устройства. Только
+    свежая команда `ON` для известного present key помещается в ограниченную очередь.
+22. Application service применяет cooldown, выполняет POST открытия и публикует
+    короткий non-retained `ON`, затем retained `OFF`. Retained-команды и `OFF`
+    никогда не вызывают provider.
 
 ## Ключевые интерфейсы
 
@@ -233,7 +251,8 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | Решение | Выбор | Обоснование |
 |---|---|---|
 | Оркестрация | Docker Compose, два сервиса | Простой перенос и независимые жизненные циклы |
-| Контроллер | `python:3.12.14-alpine3.24`, синхронный цикл | Воспроизводимый multi-arch base; runtime без сторонних Python-пакетов |
+| Контроллер | `python:3.12.14-alpine3.24`, два независимых worker | Воспроизводимый multi-arch base; сбой access не останавливает video |
+| MQTT | Eclipse Paho 2.1.0, MQTT 3.1.1 | Стабильный reconnect и совместимость со встроенным broker SprutHub |
 | HTTP | Python `urllib` с TLS verification, timeout и запретом redirects | Нет runtime-зависимостей; Bearer не уйдёт на другой host через redirect |
 | go2rtc | `alexxit/go2rtc:1.9.14` | Фиксированная multi-arch версия с FFmpeg внутри |
 | Видео | Ленивый H.264 CFR 30 fps; source/720p/360p; per-UID `copy` | Устраняет нестабильные DTS и позволяет выбирать нагрузку без фонового CPU |
@@ -264,6 +283,9 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | Snapshot временно недоступен | Нет превью, RTSP не затронут | HTTP 502/503, ограничение параллелизма и повтор клиента |
 | Камера исчезла из API | Старый endpoint остаётся, но upstream истечёт | Пометить отсутствующей; не переиспользовать её имя автоматически |
 | Порт 8554 занят | RTSP не запускается | Явная ошибка Compose; поддержать настраиваемый host-порт |
+| MQTT broker недоступен | Кнопки недоступны, видео продолжает работать | Exponential reconnect; retained catalog повторяется после подключения |
+| Одна access-категория изменилась | Часть кнопок остаётся last-known | Независимые GET, partial snapshot и отдельный retry |
+| Повтор MQTT QoS 1 | Риск повторного открытия | Duplicate detection, ограниченная очередь и cooldown до provider call |
 
 ## Проверка без Docker
 
@@ -286,4 +308,4 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 - Автоматическое управление firewall удалённого сервера.
 - Поддержка Kubernetes, Windows containers и нескольких аккаунтов Ростелекома.
 - Гарантия совместимости с недокументированными будущими изменениями API.
-- Реализация открытия дверей/шлагбаумов и обработки звонков; для них определены отдельные bounded contexts, но нет фиктивного кода.
+- Обработка звонков и двустороннего аудио; для них сохранён отдельный bounded context.

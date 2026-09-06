@@ -83,6 +83,31 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Settings.from_env(environment(VIDEO_RESOLUTIONS="1280x720"))
 
+    def test_access_control_is_off_without_mqtt_configuration(self) -> None:
+        settings = Settings.from_env(environment())
+        self.assertEqual(settings.access_control, "off")
+        self.assertIsNone(settings.mqtt_host)
+
+    def test_mqtt_access_requires_broker_credentials(self) -> None:
+        with self.assertRaises(ValidationError):
+            Settings.from_env(environment(ACCESS_CONTROL="mqtt"))
+
+    def test_mqtt_access_configuration_is_validated_and_redacted(self) -> None:
+        settings = Settings.from_env(
+            environment(
+                ACCESS_CONTROL="mqtt",
+                MQTT_HOST="192.168.50.10",
+                MQTT_USERNAME="rtkey",
+                MQTT_PASSWORD="mqtt-password",
+            )
+        )
+        self.assertEqual(settings.mqtt_port, 44_444)
+        self.assertNotIn("mqtt-password", repr(settings))
+
+    def test_mqtt_topic_wildcards_are_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            Settings.from_env(environment(MQTT_TOPIC_PREFIX="rtkey/+"))
+
 
 if __name__ == "__main__":
     unittest.main()

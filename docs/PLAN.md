@@ -20,6 +20,7 @@ unit/contract/architecture-тесты и статические проверки
 | 5 | [Контроллер refresh](../modules/refresh_controller.md), [Клиент go2rtc](../modules/go2rtc_client.md) |
 | 6 | [Media policy](../modules/audio_policy.md), [Построитель source](../modules/stream_source.md), [Диагностика](../modules/healthcheck.md), [Snapshot endpoint](../modules/snapshot_endpoint.md) |
 | 7 | [Быстрый старт](../modules/quick_start.md) |
+| 8 | [Управление доступом](../modules/access_control.md) |
 
 ## Фаза 1 — Архитектурный baseline
 
@@ -196,3 +197,30 @@ rollback возвращает прежний media profile.
 
 Использовать предыдущий Git-тег. Не удалять volume, закрытый `.env` и каталог
 `secrets/` до подтверждения стабильной работы выбранной версии.
+
+## Фаза 8 — Кнопки открытия SprutHub через MQTT
+
+**Цель**: добавить домофоны и шлагбаумы как opt-in устройства SprutHub без раскрытия Bearer Token.
+**Результат**: существующий controller подключается к встроенному MQTT broker, публикует retained Switch и выполняет проверенную одноразовую команду открытия.
+**Статус**: [x] Реализована, [ ] проверена на целевом сервере и SprutHub
+
+### Выполнено
+
+- [x] Отдельные domain types, application ports и JSON state Access Control.
+- [x] Независимые endpoint `intercom`/`barrier`, partial refresh и generic open.
+- [x] Paho MQTT 2.1.0, reconnect, retained discovery и актуальный SprutHub template.
+- [x] Запрет retained open, allowlist каталога, bounded queue, duplicate detection и cooldown.
+- [x] Режим `off` не создаёт worker, MQTT client и provider calls.
+- [x] Installer/manager печатают настройки и соответствие provider title → MQTT key.
+
+### Проверка
+
+- [x] Unit/contract-тесты domain, API mapping, state, MQTT topics и open policy.
+- [ ] Импортировать `spruthub/rtkey_access.json` и обнаружить все retained устройства.
+- [ ] Проверить по одному открытию домофона и шлагбаума с безопасного места.
+- [ ] Отключить broker, убедиться в сохранении видео и автоматическом reconnect.
+
+### Rollback
+
+Повторно выполнить `./install.sh --access-control off`. Видео, RTSP и snapshot
+продолжат работать; access worker и MQTT connection не создаются.
