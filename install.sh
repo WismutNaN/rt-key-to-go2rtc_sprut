@@ -324,7 +324,7 @@ for ((_attempt = 1; _attempt <= 90; _attempt++)); do
             for ((_access_attempt = 1; _access_attempt <= 30; _access_attempt++)); do
                 if ACCESS_OUTPUT="$(docker compose exec -T controller python -m rtkey_gateway access-show 2>/dev/null)"; then
                     printf '\n%s\n' "$ACCESS_OUTPUT"
-                    echo "Import spruthub/rtkey_access.json into the SprutHub MQTT catalog."
+                    echo "Import spruthub/rtkey_access_v2.json into the SprutHub MQTT catalog."
                     echo "Then restart the SprutHub MQTT controller to discover retained devices."
                     echo "Management: ./manage.sh status | show | access | logs | set-token"
                     exit 0

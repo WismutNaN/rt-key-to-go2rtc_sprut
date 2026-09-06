@@ -272,7 +272,9 @@ class MqttAccessEvents:
     def _publish_catalog_now(self, bindings: Iterable[AccessBinding]) -> None:
         for binding in bindings:
             base = f"{self.topic_prefix}/access/{binding.mqtt_key.value}"
-            self._publish(f"{base}/state", "OFF", retain=True)
+            # Publish descriptive metadata before the discovery topic. On first
+            # discovery SprutHub can then resolve the Name characteristic and
+            # the read-only identification options immediately.
             self._publish(f"{base}/name", binding.point.title, retain=True)
             self._publish(f"{base}/kind", binding.point.kind.value, retain=True)
             self._publish(
@@ -283,6 +285,7 @@ class MqttAccessEvents:
             self._publish(
                 f"{base}/camera_id", binding.point.camera_id or "", retain=True
             )
+            self._publish(f"{base}/state", "OFF", retain=True)
 
     def publish_bridge_availability(self, online: bool) -> None:
         self._publish(

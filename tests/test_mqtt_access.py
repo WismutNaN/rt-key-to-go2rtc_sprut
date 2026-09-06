@@ -114,6 +114,11 @@ class MqttAccessTests(unittest.TestCase):
             (f"rtkey/access/{key}/name", "Подъезд", 1, True),
             self.client.published,
         )
+        published_topics = [topic for topic, *_ in self.client.published]
+        self.assertLess(
+            published_topics.index(f"rtkey/access/{key}/name"),
+            published_topics.index(f"rtkey/access/{key}/state"),
+        )
 
     def test_only_non_retained_on_command_is_forwarded(self) -> None:
         key = binding().mqtt_key.value
@@ -151,32 +156,51 @@ class AccessStateTests(unittest.TestCase):
 
     def test_spruthub_template_uses_current_export_format(self) -> None:
         template = json.loads(
-            (ROOT / "spruthub" / "rtkey_access.json").read_text(encoding="utf-8")
+            (ROOT / "spruthub" / "rtkey_access_v2.json").read_text(
+                encoding="utf-8"
+            )
         )
 
         self.assertEqual(
-            set(template), {"name", "manufacturer", "model", "modelIds", "services"}
+            set(template),
+            {"name", "manufacturer", "model", "modelIds", "services", "options"},
         )
         self.assertNotIn("modelId", template)
         self.assertIsInstance(template["modelIds"], list)
         self.assertEqual(len(template["modelIds"]), 1)
 
         key = binding().mqtt_key.value
-        state_topic = f"rtkey/access/{key}/state"
-        match = re.fullmatch(template["modelIds"][0], state_topic)
+        name_topic = f"rtkey/access/{key}/name"
+        match = re.fullmatch(template["modelIds"][0], name_topic)
         self.assertIsNotNone(match)
         self.assertEqual(match.group(1), key)
 
-        characteristic = template["services"][0]["characteristics"][0]
-        self.assertIsInstance(characteristic["link"], list)
-        self.assertEqual(len(characteristic["link"]), 1)
-        link = characteristic["link"][0]
+        characteristics = template["services"][0]["characteristics"]
+        self.assertEqual([item["type"] for item in characteristics], ["Name", "On"])
+        name_link = characteristics[0]["link"]
+        self.assertIsInstance(name_link, list)
+        self.assertEqual(name_link[0]["topicGet"].replace("(1)", key), name_topic)
+
+        link = characteristics[1]["link"][0]
         self.assertEqual(link["type"], "String")
-        self.assertEqual(link["topicGet"].replace("(1)", key), state_topic)
+        self.assertEqual(
+            link["topicGet"].replace("(1)", key), f"rtkey/access/{key}/state"
+        )
         self.assertEqual(
             link["topicSet"].replace("(1)", key), f"rtkey/access/{key}/set"
         )
         self.assertEqual(link["map"], {"false": "OFF", "true": "ON"})
+
+        options = {item["name"]: item for item in template["options"]}
+        self.assertEqual(set(options), {"Provider name", "Access type"})
+        for option in options.values():
+            self.assertFalse(option["write"])
+            self.assertEqual(option["inputType"], "STATUS")
+            self.assertIsInstance(option["link"], list)
+        self.assertEqual(
+            options["Provider name"]["link"][0]["topicGet"].replace("(1)", key),
+            name_topic,
+        )
 
 
 if __name__ == "__main__":

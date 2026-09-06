@@ -235,7 +235,7 @@ def command_access_show(container: Container) -> int:
     print(f"Username: {settings.mqtt_username}")
     print(f"Password: {settings.mqtt_password}")
     print(f"Topic prefix: {settings.mqtt_topic_prefix}")
-    print("Template: spruthub/rtkey_access.json")
+    print("Template: spruthub/rtkey_access_v2.json")
     print()
     bindings = sorted(
         (binding for binding in state.bindings.values() if binding.present),

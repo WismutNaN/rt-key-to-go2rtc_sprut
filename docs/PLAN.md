@@ -214,7 +214,7 @@ unit/contract/architecture-тесты и статические проверки
 ### Проверка
 
 - [x] Unit/contract-тесты domain, API mapping, state, MQTT topics и open policy.
-- [ ] Импортировать `spruthub/rtkey_access.json` и обнаружить все retained устройства.
+- [ ] Импортировать `spruthub/rtkey_access_v2.json` и обнаружить все retained устройства.
 - [ ] Проверить по одному открытию домофона и шлагбаума с безопасного места.
 - [ ] Отключить broker, убедиться в сохранении видео и автоматическом reconnect.
 

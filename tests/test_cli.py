@@ -154,6 +154,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         rendered = output.getvalue()
         self.assertIn("SprutHub MQTT access control", rendered)
+        self.assertIn("Template: spruthub/rtkey_access_v2.json", rendered)
         self.assertIn("Device: Подъезд 1", rendered)
         self.assertIn(f"MQTT key: {binding.mqtt_key.value}", rendered)
 

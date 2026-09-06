@@ -1,0 +1,67 @@
+{
+  "name": "RT Key access point",
+  "manufacturer": "Rostelecom",
+  "model": "Intercom or barrier",
+  "modelIds": [
+    "rtkey/access/([a-z0-9][a-z0-9_-]{0,63})/name"
+  ],
+  "services": [
+    {
+      "name": "Open",
+      "type": "Switch",
+      "characteristics": [
+        {
+          "type": "Name",
+          "link": [
+            {
+              "type": "String",
+              "topicGet": "rtkey/access/(1)/name"
+            }
+          ]
+        },
+        {
+          "type": "On",
+          "link": [
+            {
+              "type": "String",
+              "topicGet": "rtkey/access/(1)/state",
+              "topicSet": "rtkey/access/(1)/set",
+              "map": {
+                "false": "OFF",
+                "true": "ON"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "options": [
+    {
+      "name": "Provider name",
+      "description": "Name returned by Rostelecom",
+      "type": "String",
+      "write": false,
+      "inputType": "STATUS",
+      "link": [
+        {
+          "type": "String",
+          "topicGet": "rtkey/access/(1)/name"
+        }
+      ]
+    },
+    {
+      "name": "Access type",
+      "description": "Intercom or barrier",
+      "type": "String",
+      "write": false,
+      "inputType": "STATUS",
+      "link": [
+        {
+          "type": "String",
+          "topicGet": "rtkey/access/(1)/kind"
+        }
+      ]
+    }
+  ]
+}
