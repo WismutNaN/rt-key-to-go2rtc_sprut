@@ -14,7 +14,7 @@
 | `AccessControlService` | use case | Refresh, проверка команды, cooldown и вызов provider |
 | `RtKeyAccessControl` | adapter | `intercom`, `barrier` и `POST .../{id}/open` |
 | `MqttAccessEvents` | adapter | Retained discovery, reconnect, momentary switch и anti-replay |
-| `SprutHubAccessTemplate` | adapter DTO | Статический шаблон конкретного места с exact MQTT topics |
+| `SprutHubAccessTemplate` | adapter DTO | Один составной шаблон со статически именованными Switch services |
 
 ## Зависимости
 
@@ -22,7 +22,7 @@
 |---|---|
 | Shared kernel | `AccessTokenSource`, `Clock`, typed errors |
 | JSON access state | Стабильный MQTT key и last-known каталог |
-| SprutHub | Встроенный MQTT broker и отдельный сгенерированный шаблон каждого места |
+| SprutHub | Встроенный MQTT broker и один сгенерированный составной шаблон |
 
 ## Инварианты
 
@@ -32,7 +32,8 @@
 - Все команды сериализованы одной очередью и ограничены cooldown по устройству.
 - Частичный отказ одной категории API не удаляет last-known устройства другой категории.
 - Выключенный `ACCESS_CONTROL=off` не создаёт MQTT client и не обращается к access API.
-- Все видимые имена шаблона равны provider title; только дубли получают стабильный suffix.
+- Каждая Switch service называется provider title; только дубли получают стабильный suffix.
+- Retained `access/catalog` обнаруживает составное устройство после публикации состояний кнопок.
 
 ## Намеренно НЕ обрабатывает
 
