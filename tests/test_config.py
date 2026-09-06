@@ -79,6 +79,10 @@ class SettingsTests(unittest.TestCase):
             ["source", "960x540"],
         )
 
+    def test_resolution_list_must_start_with_source(self) -> None:
+        with self.assertRaises(ValidationError):
+            Settings.from_env(environment(VIDEO_RESOLUTIONS="1280x720"))
+
 
 if __name__ == "__main__":
     unittest.main()

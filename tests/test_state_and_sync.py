@@ -300,6 +300,28 @@ class SynchronizerTests(unittest.TestCase):
         self.assertEqual(len(gateway.updates), 3)
         self.assertIsNone(repository.state.bindings["uid"].last_error)
 
+    def test_missing_resolution_variant_is_restored_without_replacing_base(self) -> None:
+        feed = make_feed("uid", "Camera", 5_000)
+        repository = MemoryRepository()
+        gateway = Gateway()
+        use_case = SynchronizeVideoFeeds(
+            Catalog([feed]),
+            gateway,
+            repository,
+            FakeClock(1_000),
+            MediaPolicy(),
+        )
+        use_case.refresh_once()
+        gateway.names.remove("camera_640x360")
+        gateway.updates.clear()
+
+        result = use_case.refresh_once()
+
+        self.assertEqual(result.updated, 0)
+        self.assertEqual(
+            [update[0] for update in gateway.updates], ["camera_640x360"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

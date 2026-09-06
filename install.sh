@@ -29,6 +29,8 @@ AUDIO_MODE="${AUDIO_MODE:-$(read_env AUDIO_MODE)}"
 AUDIO_MODE="${AUDIO_MODE:-pcma}"
 VIDEO_MODE="${VIDEO_MODE:-$(read_env VIDEO_MODE)}"
 VIDEO_MODE="${VIDEO_MODE:-h264}"
+VIDEO_FPS="${VIDEO_FPS:-$(read_env VIDEO_FPS)}"
+VIDEO_FPS="${VIDEO_FPS:-30}"
 VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-$(read_env VIDEO_RESOLUTIONS)}"
 VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-source,1280x720,640x360}"
 
@@ -45,6 +47,7 @@ usage() {
   --probe-workers <N>  параллельные первичные проверки (по умолчанию 1)
   --audio <MODE>        copy|aac|pcma|pcmu|none (по умолчанию pcma)
   --video <MODE>        h264|copy (по умолчанию стабильный h264)
+  --fps <N>             частота стабильных H.264-вариантов, 1..60
   --resolutions <LIST>  source,1280x720,640x360 (от одного до четырёх)
   -h, --help            показать справку
 
@@ -79,6 +82,8 @@ while [[ $# -gt 0 ]]; do
         --audio=*) AUDIO_MODE="${1#*=}"; shift ;;
         --video) require_value "$@"; VIDEO_MODE="$2"; shift 2 ;;
         --video=*) VIDEO_MODE="${1#*=}"; shift ;;
+        --fps) require_value "$@"; VIDEO_FPS="$2"; shift 2 ;;
+        --fps=*) VIDEO_FPS="${1#*=}"; shift ;;
         --resolutions) require_value "$@"; VIDEO_RESOLUTIONS="$2"; shift 2 ;;
         --resolutions=*) VIDEO_RESOLUTIONS="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -194,8 +199,6 @@ AUDIO_OVERRIDES_JSON="$(read_env AUDIO_OVERRIDES_JSON)"
 if [[ -z "$AUDIO_OVERRIDES_JSON" ]]; then
     AUDIO_OVERRIDES_JSON='{}'
 fi
-VIDEO_FPS="$(read_env VIDEO_FPS)"
-VIDEO_FPS="${VIDEO_FPS:-30}"
 [[ "$VIDEO_FPS" =~ ^[0-9]+$ ]] && (( VIDEO_FPS >= 1 && VIDEO_FPS <= 60 )) || {
     echo "VIDEO_FPS должен быть числом от 1 до 60." >&2
     exit 2
