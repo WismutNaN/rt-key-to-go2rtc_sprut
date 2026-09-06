@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
-import json
 import os
 import re
 from dataclasses import dataclass, field
 
-from rtkey_gateway.domain import AudioMode, MediaPolicy, MediaResolution, VideoMode
+from rtkey_gateway.domain import MediaPolicy
 from rtkey_gateway.errors import ValidationError
 
 
@@ -86,6 +85,7 @@ class Settings:
     snapshot_port: int
     snapshot_listen_port: int
     snapshot_workers: int
+    snapshot_cache_seconds: int
     media_policy: MediaPolicy
     allowed_stream_host_suffixes: tuple[str, ...]
     http_timeout: int
@@ -114,40 +114,6 @@ class Settings:
     @classmethod
     def from_env(cls, source: dict[str, str] | None = None) -> "Settings":
         env = dict(os.environ if source is None else source)
-        default_audio = AudioMode.parse(env.get("AUDIO_MODE", "pcma"))
-        raw_overrides = env.get("AUDIO_OVERRIDES_JSON", "{}").strip() or "{}"
-        try:
-            overrides_payload = json.loads(raw_overrides)
-        except json.JSONDecodeError as exc:
-            raise ValidationError("AUDIO_OVERRIDES_JSON must be valid JSON") from exc
-        if not isinstance(overrides_payload, dict):
-            raise ValidationError("AUDIO_OVERRIDES_JSON must be an object")
-        overrides = {
-            str(camera_id): AudioMode.parse(str(mode))
-            for camera_id, mode in overrides_payload.items()
-        }
-        default_video = VideoMode.parse(env.get("VIDEO_MODE", "h264"))
-        raw_video_overrides = env.get("VIDEO_OVERRIDES_JSON", "{}").strip() or "{}"
-        try:
-            video_overrides_payload = json.loads(raw_video_overrides)
-        except json.JSONDecodeError as exc:
-            raise ValidationError("VIDEO_OVERRIDES_JSON must be valid JSON") from exc
-        if not isinstance(video_overrides_payload, dict):
-            raise ValidationError("VIDEO_OVERRIDES_JSON must be an object")
-        video_overrides = {
-            str(camera_id): VideoMode.parse(str(mode))
-            for camera_id, mode in video_overrides_payload.items()
-        }
-        video_fps = _positive_int(env, "VIDEO_FPS", 30)
-        if video_fps > 60:
-            raise ValidationError("VIDEO_FPS cannot be greater than 60")
-        resolutions = tuple(
-            MediaResolution.parse(item)
-            for item in env.get(
-                "VIDEO_RESOLUTIONS", "source,1280x720,640x360"
-            ).split(",")
-            if item.strip()
-        )
         suffixes = tuple(
             item.strip().lstrip(".")
             for item in env.get("ALLOWED_STREAM_HOST_SUFFIXES", "camera.rt.ru").split(",")
@@ -166,6 +132,13 @@ class Settings:
         snapshot_workers = _positive_int(env, "SNAPSHOT_WORKERS", 2)
         if snapshot_workers > 16:
             raise ValidationError("SNAPSHOT_WORKERS cannot be greater than 16")
+        snapshot_cache_seconds = _positive_int(
+            env, "SNAPSHOT_CACHE_SECONDS", 30
+        )
+        if snapshot_cache_seconds > 3_600:
+            raise ValidationError(
+                "SNAPSHOT_CACHE_SECONDS cannot be greater than 3600"
+            )
 
         access_control = env.get("ACCESS_CONTROL", "off").strip().lower() or "off"
         if access_control not in {"off", "mqtt"}:
@@ -206,14 +179,8 @@ class Settings:
             snapshot_port=_port(env, "SNAPSHOT_PORT", 8080),
             snapshot_listen_port=_port(env, "SNAPSHOT_LISTEN_PORT", 8080),
             snapshot_workers=snapshot_workers,
-            media_policy=MediaPolicy(
-                default_audio=default_audio,
-                audio_overrides=overrides,
-                default_video=default_video,
-                video_overrides=video_overrides,
-                video_fps=video_fps,
-                resolutions=resolutions,
-            ),
+            snapshot_cache_seconds=snapshot_cache_seconds,
+            media_policy=MediaPolicy(),
             allowed_stream_host_suffixes=suffixes,
             http_timeout=_positive_int(env, "HTTP_TIMEOUT_SECONDS", 20),
             rtsp_probe_timeout=_positive_int(

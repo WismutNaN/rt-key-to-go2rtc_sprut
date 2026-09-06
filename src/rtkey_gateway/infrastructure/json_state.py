@@ -90,25 +90,23 @@ class JsonVideoStateRepository:
         raw_profile = data.get("last_good_profile")
         if raw_profile is not None and not isinstance(raw_profile, dict):
             raise ValidationError("State media profile is not an object")
-        profile = (
-            MediaProfile(
-                audio_mode=AudioMode.parse(str(raw_profile.get("audio_mode", "copy"))),
-                video_mode=VideoMode.parse(str(raw_profile.get("video_mode", "copy"))),
-                video_fps=int(raw_profile.get("video_fps", 30)),
-                video_width=(
-                    int(raw_profile["video_width"])
-                    if raw_profile.get("video_width") is not None
-                    else None
-                ),
-                video_height=(
-                    int(raw_profile["video_height"])
-                    if raw_profile.get("video_height") is not None
-                    else None
-                ),
+        profile = None
+        if raw_profile is not None:
+            # Unsupported experimental encode/scale profiles are deliberately
+            # forgotten. The synchronizer will restore this binding with the
+            # current copy-only profile before it contacts the provider.
+            supported = (
+                raw_profile.get("video_mode", "copy") == "copy"
+                and raw_profile.get("audio_mode", "copy") == "pcmu"
+                and raw_profile.get("video_width") is None
+                and raw_profile.get("video_height") is None
             )
-            if raw_profile is not None
-            else None
-        )
+            if supported:
+                profile = MediaProfile(
+                    audio_mode=AudioMode.PCMU,
+                    video_mode=VideoMode.COPY,
+                    video_fps=15,
+                )
         return CameraBinding(
             camera_id=CameraId(str(data["camera_id"])),
             stream_name=StreamName(str(data["stream_name"])),

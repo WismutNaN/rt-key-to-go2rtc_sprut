@@ -25,15 +25,17 @@ class GetCameraSnapshot:
         for item in state.bindings.values():
             if not item.present or item.last_good_upstream is None:
                 continue
-            names = {
-                variant.stream_name_value(item.stream_name.value)
-                for variant in self.media_policy.variants_for(
-                    item.camera_id.value,
-                    base_profile=item.last_good_profile,
-                )
-            }
-            if stream_name.value in names:
-                binding = item
+            for variant in self.media_policy.variants_for(
+                item.camera_id.value,
+                base_profile=item.last_good_profile,
+            ):
+                if (
+                    variant.stream_name_value(item.stream_name.value)
+                    == stream_name.value
+                ):
+                    binding = item
+                    break
+            if binding is not None:
                 break
         if binding is None or binding.last_good_upstream is None:
             raise ValidationError("Snapshot stream is unknown or not verified")

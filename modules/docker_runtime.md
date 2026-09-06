@@ -27,8 +27,8 @@
 - Порт `1984` отсутствует в `ports`.
 - Публикуются `${RTSP_PORT:-8554}:8554/tcp` и узкий Basic-auth snapshot
   `${SNAPSHOT_PORT:-8080}:8080/tcp`; API `1984` не публикуется.
-- Privileged, host network и GPU не требуются. H.264 нормализуется программно
-  только при наличии consumer.
+- Privileged, host network и GPU не требуются. По умолчанию H.264 передаётся без
+  декодирования; программная нормализация доступна только как opt-in fallback.
 - RTSP-сервер go2rtc выдаёт RTP interleaved по TCP; WebRTC отключён, поэтому bridge-сети и одного TCP mapping достаточно.
 - Controller запускается не от root и получает state directory на запись.
 - Bearer передаётся controller только как file-backed Compose secret; source

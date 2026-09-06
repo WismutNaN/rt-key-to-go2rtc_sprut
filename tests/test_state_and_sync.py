@@ -80,7 +80,7 @@ class StateRepositoryTests(unittest.TestCase):
                         StreamName("podezd"),
                         "Подъезд",
                         last_good_upstream=SecretUrl("https://x.camera.rt.ru/?token=secret"),
-                        last_good_profile=MediaProfile(AudioMode.PCMA),
+                        last_good_profile=MediaProfile(AudioMode.PCMU),
                         last_good_expires_at=2_000_000_000,
                     )
                 }
@@ -93,7 +93,7 @@ class StateRepositoryTests(unittest.TestCase):
             self.assertIsNone(recovered.last_fetch_at)
             self.assertEqual(
                 recovered.bindings["uid"].last_good_profile.audio_mode,
-                AudioMode.PCMA,
+                AudioMode.PCMU,
             )
             self.assertNotIn("last_good_upstream", str(repository.sanitized()))
             repository.save(recovered)
@@ -121,6 +121,33 @@ class StateRepositoryTests(unittest.TestCase):
             with self.assertRaises(StateError):
                 JsonVideoStateRepository(path).load()
 
+    def test_legacy_h264_profile_is_forgotten_for_safe_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bindings": {
+                            "uid": {
+                                "camera_id": "uid",
+                                "stream_name": "camera",
+                                "title": "Camera",
+                                "present": True,
+                                "last_good_profile": {
+                                    "video_mode": "h264",
+                                    "video_fps": 30,
+                                    "audio_mode": "pcma",
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = JsonVideoStateRepository(path).load()
+            self.assertIsNone(state.bindings["uid"].last_good_profile)
+
 
 class SynchronizerTests(unittest.TestCase):
     def test_refresh_updates_all_and_schedules_before_expiry(self) -> None:
@@ -139,11 +166,7 @@ class SynchronizerTests(unittest.TestCase):
             gateway.names,
             {
                 "podezd",
-                "podezd_1280x720",
-                "podezd_640x360",
                 "dvor",
-                "dvor_1280x720",
-                "dvor_640x360",
             },
         )
 
@@ -224,15 +247,11 @@ class SynchronizerTests(unittest.TestCase):
         use_case = SynchronizeVideoFeeds(
             Catalog([]), gateway, MemoryRepository(state), FakeClock(1_000), MediaPolicy()
         )
-        self.assertEqual(use_case.restore_missing_runtime(), 5)
+        self.assertEqual(use_case.restore_missing_runtime(), 1)
         self.assertEqual(
             {update[0] for update in gateway.updates},
             {
                 "missing_camera",
-                "missing_camera_1280x720",
-                "missing_camera_640x360",
-                "existing_camera_1280x720",
-                "existing_camera_640x360",
             },
         )
 
@@ -297,31 +316,8 @@ class SynchronizerTests(unittest.TestCase):
         second = use_case.refresh_once()
 
         self.assertEqual((first.updated, second.updated), (1, 0))
-        self.assertEqual(len(gateway.updates), 3)
+        self.assertEqual(len(gateway.updates), 1)
         self.assertIsNone(repository.state.bindings["uid"].last_error)
-
-    def test_missing_resolution_variant_is_restored_without_replacing_base(self) -> None:
-        feed = make_feed("uid", "Camera", 5_000)
-        repository = MemoryRepository()
-        gateway = Gateway()
-        use_case = SynchronizeVideoFeeds(
-            Catalog([feed]),
-            gateway,
-            repository,
-            FakeClock(1_000),
-            MediaPolicy(),
-        )
-        use_case.refresh_once()
-        gateway.names.remove("camera_640x360")
-        gateway.updates.clear()
-
-        result = use_case.refresh_once()
-
-        self.assertEqual(result.updated, 0)
-        self.assertEqual(
-            [update[0] for update in gateway.updates], ["camera_640x360"]
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

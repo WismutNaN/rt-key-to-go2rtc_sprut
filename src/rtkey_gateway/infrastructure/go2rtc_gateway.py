@@ -21,6 +21,7 @@ class Go2RtcMediaGateway:
         password: str,
         transport: HttpTransport,
         timeout: float = 10.0,
+        snapshot_cache_seconds: int = 30,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
@@ -31,6 +32,7 @@ class Go2RtcMediaGateway:
         }
         self.transport = transport
         self.timeout = timeout
+        self.snapshot_cache_seconds = snapshot_cache_seconds
 
     def _request(self, method: str, query: dict[str, str] | None = None):
         return self._request_api("/api/streams", method, query)
@@ -54,10 +56,14 @@ class Go2RtcMediaGateway:
         )
 
     def fetch_jpeg(self, name: StreamName) -> bytes:
+        query = {
+            "src": name.value,
+            "cache": f"{self.snapshot_cache_seconds}s",
+        }
         response = self._request_api(
             "/api/frame.jpeg",
             "GET",
-            {"src": name.value, "cache": "10s"},
+            query,
             accept="image/jpeg",
         )
         if response.status in {401, 403}:

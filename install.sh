@@ -23,16 +23,10 @@ SNAPSHOT_PORT="${SNAPSHOT_PORT:-$(read_env SNAPSHOT_PORT)}"
 SNAPSHOT_PORT="${SNAPSHOT_PORT:-8080}"
 SNAPSHOT_WORKERS="${SNAPSHOT_WORKERS:-$(read_env SNAPSHOT_WORKERS)}"
 SNAPSHOT_WORKERS="${SNAPSHOT_WORKERS:-2}"
+SNAPSHOT_CACHE_SECONDS="${SNAPSHOT_CACHE_SECONDS:-$(read_env SNAPSHOT_CACHE_SECONDS)}"
+SNAPSHOT_CACHE_SECONDS="${SNAPSHOT_CACHE_SECONDS:-30}"
 RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-$(read_env RTSP_PROBE_WORKERS)}"
 RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-1}"
-AUDIO_MODE="${AUDIO_MODE:-$(read_env AUDIO_MODE)}"
-AUDIO_MODE="${AUDIO_MODE:-pcma}"
-VIDEO_MODE="${VIDEO_MODE:-$(read_env VIDEO_MODE)}"
-VIDEO_MODE="${VIDEO_MODE:-h264}"
-VIDEO_FPS="${VIDEO_FPS:-$(read_env VIDEO_FPS)}"
-VIDEO_FPS="${VIDEO_FPS:-30}"
-VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-$(read_env VIDEO_RESOLUTIONS)}"
-VIDEO_RESOLUTIONS="${VIDEO_RESOLUTIONS:-source,1280x720,640x360}"
 ACCESS_CONTROL="${ACCESS_CONTROL:-$(read_env ACCESS_CONTROL)}"
 ACCESS_CONTROL="${ACCESS_CONTROL:-off}"
 MQTT_HOST="${MQTT_HOST:-$(read_env MQTT_HOST)}"
@@ -51,11 +45,8 @@ Options:
   --rtsp-port <PORT>     Published RTSP port (default: 8554)
   --snapshot-port <PORT> Published HTTP snapshot port (default: 8080)
   --snapshot-workers <N> Maximum concurrent snapshots (default: 2)
+  --snapshot-cache <SEC> Reuse a JPEG for this many seconds (default: 30)
   --probe-workers <N>    Concurrent initial stream checks (default: 1)
-  --audio <MODE>         copy|aac|pcma|pcmu|none (default: pcma)
-  --video <MODE>         h264|copy (default: stable h264)
-  --fps <N>              Stable H.264 frame rate, 1..60
-  --resolutions <LIST>   source,1280x720,640x360 (one to four variants)
   --access-control <MODE> off|mqtt (default: off)
   --mqtt-host <HOST>     SprutHub LAN address when MQTT access is enabled
   --mqtt-port <PORT>     SprutHub MQTT port (default: 44444)
@@ -87,16 +78,10 @@ while [[ $# -gt 0 ]]; do
         --snapshot-port=*) SNAPSHOT_PORT="${1#*=}"; shift ;;
         --snapshot-workers) require_value "$@"; SNAPSHOT_WORKERS="$2"; shift 2 ;;
         --snapshot-workers=*) SNAPSHOT_WORKERS="${1#*=}"; shift ;;
+        --snapshot-cache) require_value "$@"; SNAPSHOT_CACHE_SECONDS="$2"; shift 2 ;;
+        --snapshot-cache=*) SNAPSHOT_CACHE_SECONDS="${1#*=}"; shift ;;
         --probe-workers) require_value "$@"; RTSP_PROBE_WORKERS="$2"; shift 2 ;;
         --probe-workers=*) RTSP_PROBE_WORKERS="${1#*=}"; shift ;;
-        --audio) require_value "$@"; AUDIO_MODE="$2"; shift 2 ;;
-        --audio=*) AUDIO_MODE="${1#*=}"; shift ;;
-        --video) require_value "$@"; VIDEO_MODE="$2"; shift 2 ;;
-        --video=*) VIDEO_MODE="${1#*=}"; shift ;;
-        --fps) require_value "$@"; VIDEO_FPS="$2"; shift 2 ;;
-        --fps=*) VIDEO_FPS="${1#*=}"; shift ;;
-        --resolutions) require_value "$@"; VIDEO_RESOLUTIONS="$2"; shift 2 ;;
-        --resolutions=*) VIDEO_RESOLUTIONS="${1#*=}"; shift ;;
         --access-control) require_value "$@"; ACCESS_CONTROL="$2"; shift 2 ;;
         --access-control=*) ACCESS_CONTROL="${1#*=}"; shift ;;
         --mqtt-host) require_value "$@"; MQTT_HOST="$2"; shift 2 ;;
@@ -121,39 +106,10 @@ docker compose version >/dev/null 2>&1 || {
     exit 1
 }
 
-case "$AUDIO_MODE" in
-    copy|aac|pcma|pcmu|none) ;;
-    *) echo "Invalid audio mode: $AUDIO_MODE" >&2; exit 2 ;;
-esac
-case "$VIDEO_MODE" in
-    h264|copy) ;;
-    *) echo "Invalid video mode: $VIDEO_MODE" >&2; exit 2 ;;
-esac
 case "$ACCESS_CONTROL" in
     off|mqtt) ;;
     *) echo "Invalid access control mode: $ACCESS_CONTROL" >&2; exit 2 ;;
 esac
-[[ "$VIDEO_RESOLUTIONS" =~ ^source(,[0-9]+x[0-9]+){0,3}$ ]] || {
-    echo "Resolutions must be source followed by up to three WIDTHxHEIGHT values." >&2
-    exit 2
-}
-IFS=',' read -r -a RESOLUTION_ITEMS <<< "$VIDEO_RESOLUTIONS"
-declare -A SEEN_RESOLUTIONS=()
-for RESOLUTION_ITEM in "${RESOLUTION_ITEMS[@]}"; do
-    [[ -z "${SEEN_RESOLUTIONS[$RESOLUTION_ITEM]:-}" ]] || {
-        echo "Resolution values must be unique." >&2
-        exit 2
-    }
-    SEEN_RESOLUTIONS[$RESOLUTION_ITEM]=1
-    [[ "$RESOLUTION_ITEM" == source ]] && continue
-    WIDTH="${RESOLUTION_ITEM%x*}"
-    HEIGHT="${RESOLUTION_ITEM#*x}"
-    (( WIDTH >= 160 && WIDTH <= 3840 && HEIGHT >= 90 && HEIGHT <= 2160 \
-        && WIDTH % 2 == 0 && HEIGHT % 2 == 0 )) || {
-        echo "Resolution $RESOLUTION_ITEM must use even dimensions in the 160x90..3840x2160 range." >&2
-        exit 2
-    }
-done
 [[ "$RTSP_PORT" =~ ^[0-9]+$ ]] && (( RTSP_PORT >= 1 && RTSP_PORT <= 65535 )) || {
     echo "RTSP port must be a number from 1 to 65535." >&2
     exit 2
@@ -261,18 +217,11 @@ fi
     echo "SNAPSHOT_WORKERS must be a number from 1 to 16." >&2
     exit 2
 }
-AUDIO_OVERRIDES_JSON="$(read_env AUDIO_OVERRIDES_JSON)"
-if [[ -z "$AUDIO_OVERRIDES_JSON" ]]; then
-    AUDIO_OVERRIDES_JSON='{}'
-fi
-[[ "$VIDEO_FPS" =~ ^[0-9]+$ ]] && (( VIDEO_FPS >= 1 && VIDEO_FPS <= 60 )) || {
-    echo "VIDEO_FPS must be a number from 1 to 60." >&2
+[[ "$SNAPSHOT_CACHE_SECONDS" =~ ^[0-9]+$ ]] \
+    && (( SNAPSHOT_CACHE_SECONDS >= 1 && SNAPSHOT_CACHE_SECONDS <= 3600 )) || {
+    echo "SNAPSHOT_CACHE_SECONDS must be a number from 1 to 3600." >&2
     exit 2
 }
-VIDEO_OVERRIDES_JSON="$(read_env VIDEO_OVERRIDES_JSON)"
-if [[ -z "$VIDEO_OVERRIDES_JSON" ]]; then
-    VIDEO_OVERRIDES_JSON='{}'
-fi
 ALLOWED_STREAM_HOST_SUFFIXES="$(read_env ALLOWED_STREAM_HOST_SUFFIXES)"
 ALLOWED_STREAM_HOST_SUFFIXES="${ALLOWED_STREAM_HOST_SUFFIXES:-camera.rt.ru}"
 HTTP_TIMEOUT_SECONDS="$(read_env HTTP_TIMEOUT_SECONDS)"
@@ -325,16 +274,11 @@ RTSP_PORT=$RTSP_PORT
 SNAPSHOT_BIND_IP=$SNAPSHOT_BIND_IP
 SNAPSHOT_PORT=$SNAPSHOT_PORT
 SNAPSHOT_WORKERS=$SNAPSHOT_WORKERS
+SNAPSHOT_CACHE_SECONDS=$SNAPSHOT_CACHE_SECONDS
 RTSP_USERNAME=$RTSP_USERNAME
 RTSP_PASSWORD=$RTSP_PASSWORD
 GO2RTC_API_USERNAME=$GO2RTC_API_USERNAME
 GO2RTC_API_PASSWORD=$GO2RTC_API_PASSWORD
-VIDEO_MODE=$VIDEO_MODE
-VIDEO_FPS=$VIDEO_FPS
-VIDEO_RESOLUTIONS=$VIDEO_RESOLUTIONS
-VIDEO_OVERRIDES_JSON=$VIDEO_OVERRIDES_JSON
-AUDIO_MODE=$AUDIO_MODE
-AUDIO_OVERRIDES_JSON=$AUDIO_OVERRIDES_JSON
 ALLOWED_STREAM_HOST_SUFFIXES=$ALLOWED_STREAM_HOST_SUFFIXES
 HTTP_TIMEOUT_SECONDS=$HTTP_TIMEOUT_SECONDS
 RTSP_PROBE_TIMEOUT_SECONDS=$RTSP_PROBE_TIMEOUT_SECONDS
@@ -366,7 +310,7 @@ echo "Validating the Docker Compose configuration..."
 docker compose config --quiet
 
 echo "Building the controller and starting services..."
-docker compose up -d --build go2rtc
+docker compose up -d --build --force-recreate go2rtc
 docker compose up -d --build --force-recreate --no-deps controller
 
 echo "Waiting for the first verified camera list..."

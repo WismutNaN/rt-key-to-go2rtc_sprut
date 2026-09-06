@@ -27,6 +27,7 @@ class SnapshotHttpService:
         query: GetCameraSnapshot,
         *,
         workers: int = 2,
+        cache_seconds: int = 30,
         logger: logging.Logger | None = None,
     ) -> None:
         self.host = host
@@ -37,6 +38,7 @@ class SnapshotHttpService:
             f"{username}:{password}".encode("utf-8")
         ).decode("ascii")
         self.capacity = threading.BoundedSemaphore(max(1, workers))
+        self.cache_seconds = max(1, cache_seconds)
         self.server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
 
@@ -91,7 +93,10 @@ class SnapshotHttpService:
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Content-Length", str(len(jpeg)))
-                self.send_header("Cache-Control", "private, max-age=5")
+                self.send_header(
+                    "Cache-Control",
+                    f"private, max-age={service.cache_seconds}",
+                )
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
                 try:

@@ -75,10 +75,14 @@ class InstallSecretTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(env_file.stat().st_mode), 0o600)
         env_text = env_file.read_text(encoding="utf-8")
         self.assertNotIn("RTKEY_ACCESS_TOKEN", env_text)
-        self.assertIn("VIDEO_MODE=h264", env_text)
-        self.assertIn("VIDEO_RESOLUTIONS=source,1280x720,640x360", env_text)
-        self.assertIn("AUDIO_MODE=pcma", env_text)
+        self.assertNotIn("VIDEO_MODE=", env_text)
+        self.assertNotIn("VIDEO_FPS=", env_text)
+        self.assertNotIn("VIDEO_RESOLUTIONS=", env_text)
+        self.assertNotIn("VIDEO_OVERRIDES_JSON=", env_text)
+        self.assertNotIn("AUDIO_MODE=", env_text)
+        self.assertNotIn("AUDIO_OVERRIDES_JSON=", env_text)
         self.assertIn("SNAPSHOT_PORT=8080", env_text)
+        self.assertIn("SNAPSHOT_CACHE_SECONDS=30", env_text)
         self.assertIn("ACCESS_CONTROL=off", env_text)
         self.assertIn("MQTT_PORT=44444", env_text)
 
@@ -89,7 +93,12 @@ class InstallSecretTests(unittest.TestCase):
     def test_install_migrates_legacy_env_token(self) -> None:
         (self.workspace / ".env").write_text(
             "RTKEY_ACCESS_TOKEN=legacy.payload.signature\n"
-            "RTSP_BIND_IP=192.168.50.99\n",
+            "RTSP_BIND_IP=192.168.50.99\n"
+            "VIDEO_MODE=h264\n"
+            "VIDEO_FPS=30\n"
+            "VIDEO_RESOLUTIONS=source,1280x720,640x360\n"
+            "VIDEO_OVERRIDES_JSON={\"uid\":\"h264\"}\n"
+            "AUDIO_MODE=pcma\n",
             encoding="utf-8",
         )
         self.run_install()

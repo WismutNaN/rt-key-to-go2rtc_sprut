@@ -79,15 +79,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("Camera: Подъезд [uid]", rendered)
         self.assertIn("Stream name: podezd", rendered)
         self.assertIn("Resolution: source", rendered)
+        self.assertIn("Video mode: copy", rendered)
+        self.assertIn("Audio mode: pcmu", rendered)
         self.assertIn("rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd", rendered)
         self.assertIn(
             "http://spruthub:rtsp-password@192.168.50.99:8080/snapshot/podezd.jpg",
             rendered,
         )
-        self.assertIn(
-            "rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd_1280x720",
-            rendered,
-        )
+        self.assertNotIn("podezd_1280x720", rendered)
 
     def test_automatic_healthcheck_does_not_probe_camera_streams(self) -> None:
         now = int(time.time())

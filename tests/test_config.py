@@ -51,37 +51,40 @@ class SettingsTests(unittest.TestCase):
         settings = Settings.from_env(environment(SERVER_IP="[2001:db8::10]"))
         self.assertEqual(settings.rtsp_host, "2001:db8::10")
 
-    def test_default_media_profile_targets_spruthub_compatibility(self) -> None:
+    def test_default_media_profile_avoids_video_transcoding(self) -> None:
         settings = Settings.from_env(environment())
         profile = settings.media_policy.profile_for("uid")
-        self.assertEqual(profile.audio_mode, AudioMode.PCMA)
-        self.assertEqual(profile.video_mode, VideoMode.H264)
-        self.assertEqual(profile.video_fps, 30)
+        self.assertEqual(profile.audio_mode, AudioMode.PCMU)
+        self.assertEqual(profile.video_mode, VideoMode.COPY)
+        self.assertEqual(profile.video_fps, 15)
         self.assertEqual(
             [item.key for item in settings.media_policy.resolutions],
-            ["source", "1280x720", "640x360"],
+            ["source"],
         )
+        self.assertEqual(settings.snapshot_cache_seconds, 30)
 
-    def test_video_override_is_parsed_by_camera_uid(self) -> None:
+    def test_legacy_experimental_media_settings_are_ignored(self) -> None:
         settings = Settings.from_env(
             environment(
                 VIDEO_MODE="h264",
                 VIDEO_FPS="25",
                 VIDEO_RESOLUTIONS="source,960x540",
                 VIDEO_OVERRIDES_JSON='{"uid":"copy"}',
+                AUDIO_MODE="aac",
             )
         )
         profile = settings.media_policy.profile_for("uid")
         self.assertEqual(profile.video_mode, VideoMode.COPY)
-        self.assertEqual(profile.video_fps, 25)
+        self.assertEqual(profile.audio_mode, AudioMode.PCMU)
+        self.assertEqual(profile.video_fps, 15)
         self.assertEqual(
             [item.key for item in settings.media_policy.resolutions],
-            ["source", "960x540"],
+            ["source"],
         )
 
-    def test_resolution_list_must_start_with_source(self) -> None:
+    def test_snapshot_cache_is_bounded(self) -> None:
         with self.assertRaises(ValidationError):
-            Settings.from_env(environment(VIDEO_RESOLUTIONS="1280x720"))
+            Settings.from_env(environment(SNAPSHOT_CACHE_SECONDS="3601"))
 
     def test_access_control_is_off_without_mqtt_configuration(self) -> None:
         settings = Settings.from_env(environment())

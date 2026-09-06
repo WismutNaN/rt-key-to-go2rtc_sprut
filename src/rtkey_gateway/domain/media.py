@@ -30,7 +30,6 @@ class AudioMode(str, Enum):
 
 class VideoMode(str, Enum):
     COPY = "copy"
-    H264 = "h264"
 
     @classmethod
     def parse(cls, value: str) -> "VideoMode":
@@ -111,7 +110,9 @@ class MediaProfile:
             object.__setattr__(self, "video_mode", VideoMode.parse(self.video_mode))
         if isinstance(self.video_fps, bool) or not 1 <= self.video_fps <= 60:
             raise ValidationError("Stable video FPS must be between 1 and 60")
-        MediaResolution(self.video_width, self.video_height)
+        resolution = MediaResolution(self.video_width, self.video_height)
+        if resolution != MediaResolution():
+            raise ValidationError("Video scaling is not supported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,25 +128,17 @@ class MediaVariant:
 class MediaPolicy:
     """Resolve independent audio/video modes with per-camera overrides."""
 
-    default_audio: AudioMode = AudioMode.PCMA
+    default_audio: AudioMode = AudioMode.PCMU
     audio_overrides: Mapping[str, AudioMode] = field(default_factory=dict)
-    default_video: VideoMode = VideoMode.H264
+    default_video: VideoMode = VideoMode.COPY
     video_overrides: Mapping[str, VideoMode] = field(default_factory=dict)
-    video_fps: int = 30
-    resolutions: tuple[MediaResolution, ...] = (
-        MediaResolution(),
-        MediaResolution(1_280, 720),
-        MediaResolution(640, 360),
-    )
+    video_fps: int = 15
+    resolutions: tuple[MediaResolution, ...] = (MediaResolution(),)
 
     def __post_init__(self) -> None:
         resolutions = tuple(self.resolutions)
-        if not 1 <= len(resolutions) <= 4:
-            raise ValidationError("Configure between one and four video resolutions")
-        if resolutions[0] != MediaResolution():
-            raise ValidationError("The first video resolution must be 'source'")
-        if len(set(resolutions)) != len(resolutions):
-            raise ValidationError("Video resolutions must be unique")
+        if resolutions != (MediaResolution(),):
+            raise ValidationError("Only the source video resolution is supported")
         object.__setattr__(self, "resolutions", resolutions)
 
     def profile_for(self, camera_id: str) -> MediaProfile:
@@ -164,13 +157,12 @@ class MediaPolicy:
         base = base_profile or self.profile_for(camera_id)
         variants: list[MediaVariant] = []
         for resolution in self.resolutions:
-            scaled = resolution.width is not None
             variants.append(
                 MediaVariant(
                     resolution,
                     MediaProfile(
                         audio_mode=base.audio_mode,
-                        video_mode=VideoMode.H264 if scaled else base.video_mode,
+                        video_mode=base.video_mode,
                         video_fps=base.video_fps,
                         video_width=resolution.width,
                         video_height=resolution.height,

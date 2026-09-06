@@ -71,34 +71,31 @@ class StreamNamingTests(unittest.TestCase):
 
 
 class MediaPolicyTests(unittest.TestCase):
-    def test_audio_and_video_overrides_are_independent(self) -> None:
+    def test_audio_override_does_not_change_copy_video(self) -> None:
         policy = MediaPolicy(
             default_audio=AudioMode.COPY,
             audio_overrides={"uid": AudioMode.PCMA},
-            default_video=VideoMode.COPY,
-            video_overrides={"uid": VideoMode.H264},
         )
         profile = policy.profile_for("uid")
-        self.assertEqual(profile.video_mode, VideoMode.H264)
-        self.assertEqual(profile.audio_mode, AudioMode.PCMA)
+        self.assertEqual(profile.video_mode, VideoMode.COPY)
         self.assertEqual(profile.audio_mode, AudioMode.PCMA)
 
-    def test_compatibility_defaults_are_stable_h264(self) -> None:
+    def test_low_load_defaults_copy_source_video(self) -> None:
         policy = MediaPolicy()
         profile = policy.profile_for("uid")
-        self.assertEqual(profile.video_mode, VideoMode.H264)
-        self.assertEqual(profile.video_fps, 30)
+        self.assertEqual(profile.audio_mode, AudioMode.PCMU)
+        self.assertEqual(profile.video_mode, VideoMode.COPY)
+        self.assertEqual(profile.video_fps, 15)
         self.assertEqual(
             [variant.resolution.key for variant in policy.variants_for("uid")],
-            ["source", "1280x720", "640x360"],
+            ["source"],
         )
 
-    def test_scaled_variant_forces_h264_and_has_stable_name(self) -> None:
-        policy = MediaPolicy(default_video=VideoMode.COPY)
-        variants = policy.variants_for("uid")
-        self.assertEqual(variants[0].profile.video_mode, VideoMode.COPY)
-        self.assertEqual(variants[1].profile.video_mode, VideoMode.H264)
-        self.assertEqual(variants[1].stream_name_value("camera"), "camera_1280x720")
+    def test_scaled_variants_are_not_supported(self) -> None:
+        with self.assertRaises(ValidationError):
+            MediaPolicy(
+                resolutions=(MediaResolution(), MediaResolution(1_280, 720))
+            )
 
     def test_resolution_rejects_odd_h264_dimensions(self) -> None:
         with self.assertRaises(ValidationError):
@@ -107,6 +104,8 @@ class MediaPolicyTests(unittest.TestCase):
     def test_invalid_mode_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):
             AudioMode.parse("mp3")
+        with self.assertRaises(ValidationError):
+            VideoMode.parse("h264")
 
 
 if __name__ == "__main__":

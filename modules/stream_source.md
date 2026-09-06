@@ -21,8 +21,7 @@
 ## Инварианты
 
 - Полученный upstream URL не изменяется и не разбирается повторно.
-- Видео использует стабильный H.264 template или `copy`; аудио выбирается независимо.
-- Optional width/height передаются штатными параметрами go2rtc и всегда имеют H.264 output.
+- Видео всегда использует copy template с demuxer time base; аудио — PCMU.
 - Полный source не попадает в обычный лог.
 
 ## Намеренно НЕ обрабатывает
@@ -33,8 +32,7 @@
 ## Заметки для агента
 
 > По умолчанию формируется
-> `#input=rtkey_http#video=rtkey_h264_stable#audio=pcma`. FFmpeg template
-> нормализует timestamps в CFR и используется go2rtc лениво — только при наличии
-> consumer. Для стабильной камеры `video=copy` выключает video decode/encode даже
-> во время просмотра. Допустимость hostname проверяет Rostelecom adapter до
+> `#input=rtkey_http#video=rtkey_h264_copy#audio=pcmu`. FFmpeg только
+> перепаковывает H.264, сохраняя demuxer time base, и используется go2rtc лениво —
+> только при наличии consumer. Допустимость hostname проверяет Rostelecom adapter до
 > создания `SecretUrl`.

@@ -68,6 +68,7 @@ def build_container(settings: Settings) -> Container:
         settings.go2rtc_api_password,
         transport,
         timeout=float(settings.http_timeout),
+        snapshot_cache_seconds=settings.snapshot_cache_seconds,
     )
     repository = JsonVideoStateRepository(settings.state_file)
     media_probe = Go2RtcRtspProbe(
@@ -98,6 +99,7 @@ def build_container(settings: Settings) -> Container:
         settings.rtsp_password,
         GetCameraSnapshot(repository, media_gateway, settings.media_policy),
         workers=settings.snapshot_workers,
+        cache_seconds=settings.snapshot_cache_seconds,
     )
     access_repository: JsonAccessStateRepository | None = None
     access_service: AccessControlService | None = None
@@ -188,6 +190,8 @@ def command_show(container: Container) -> int:
         ):
             stream_name = variant.stream_name_value(binding.stream_name.value)
             print(f"Resolution: {variant.resolution.key}")
+            print(f"Video mode: {variant.profile.video_mode.value}")
+            print(f"Audio mode: {variant.profile.audio_mode.value}")
             print("RTSP URL:")
             print(
                 f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"

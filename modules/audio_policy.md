@@ -9,9 +9,9 @@
 | Символ | Тип | Описание |
 |---|---|---|
 | `AudioMode` | enum | `copy`, `aac`, `pcma`, `pcmu`, `none` |
-| `VideoMode` | enum | `h264`, `copy` |
-| `MediaResolution` | value object | `source` или чётный `WIDTHxHEIGHT` |
-| `MediaVariant` | value object | Профиль и стабильное производное имя варианта |
+| `VideoMode` | enum | `copy` |
+| `MediaResolution` | value object | Поддерживаемое значение `source` |
+| `MediaVariant` | value object | Профиль единственного source-варианта |
 | `MediaProfile` | dataclass | Неизменяемые video/audio mode и `video_fps` |
 | `MediaPolicy` | class | Читает глобальные режимы и необязательные overrides по UID |
 | `AudioPolicy` | alias | Совместимость расширений с прежним именем класса |
@@ -25,11 +25,11 @@
 
 ## Инварианты
 
-- Значения по умолчанию — H.264 CFR 30 fps и PCMA.
-- Варианты по умолчанию — `source`, `1280x720`, `640x360`; максимум четыре.
+- Значения по умолчанию — H.264 copy, 15 fps для opt-in encoder и PCMU.
+- Вариант по умолчанию — только `source`; максимум четыре.
 - Неизвестный режим завершает проверку конфигурации с понятной ошибкой до PATCH.
 - Video/audio per-camera overrides независимы и имеют приоритет над глобальными.
-- Масштабированный вариант всегда H.264: фильтр изменения размера несовместим с copy.
+- Любой масштабированный набор отклоняется до обновления runtime.
 - Изменение media policy не меняет публичные URL или mapping UID → name.
 
 ## Намеренно НЕ обрабатывает
@@ -40,7 +40,8 @@
 
 ## Заметки для агента
 
-> `VIDEO_MODE=copy` снижает нагрузку во время просмотра, но сохраняет timestamps
-> upstream. Его следует включать только после проверки конкретной камеры.
-> `AUDIO_MODE=pcma` выбран для совместимости; `none` нужен как безопасный fallback
+> `VIDEO_MODE=copy` не декодирует видео и является основным режимом. Input
+> template генерирует отсутствующие PTS и сохраняет demuxer time base; подмена
+> timestamp системным временем запрещена. `AUDIO_MODE=pcmu` соответствует
+> предпочтению, которое SprutHub показал в диагностике. `none` остаётся fallback
 > для камер с повреждённой аудиодорожкой.

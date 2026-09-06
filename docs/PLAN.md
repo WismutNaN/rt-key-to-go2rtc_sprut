@@ -4,7 +4,7 @@
 
 Основная реализация завершена. Старый systemd/cron-вариант заменён Docker
 Compose-развёртыванием из двух контейнеров. После первой серверной проверки
-добавлены on-demand snapshot, стабильный H.264 CFR, PCMA по умолчанию и ленивый
+добавлены on-demand snapshot, H.264 copy, PCMU по умолчанию и ленивый
 healthcheck. На машине разработки Docker намеренно не запускался; выполнены
 unit/contract/architecture-тесты и статические проверки. Осталась повторная
 приёмка на целевом Linux-сервере.
@@ -140,18 +140,17 @@ unit/contract/architecture-тесты и статические проверки
 ## Фаза 6 — Совместимый ленивый media и snapshot
 
 **Цель**: устранить зелёный экран, предоставить snapshot и не расходовать CPU без потребителей.
-**Результат**: H.264 CFR/`copy`, варианты source/720p/360p и независимые `pcma`,
-`pcmu`, `aac`, `copy`, `none`; защищённый JPEG URL каждого варианта.
+**Результат**: один H.264 copy source, PCMU и защищённый JPEG URL каждой камеры.
 **Статус**: [x] Реализована, [ ] проверена в SprutHub
 
 ### Выполнено
 
 - [x] Media policy независимо выбирает video/audio профиль глобально или по UID
   (→ [Модуль media policy](../modules/audio_policy.md)).
-- [x] Неровные DTS нормализуются ленивым H.264 CFR-профилем с коротким GOP
+- [x] Удалена небезопасная подмена timestamps wallclock; copy использует
+  demuxer time base без video decode/encode
   (→ [Модуль source](../modules/stream_source.md)).
-- [x] Уменьшенные разрешения получают отдельные постоянные ленивые URL; scaling
-  никогда не сочетается с `video=copy`.
+- [x] Неподдерживаемые уменьшенные варианты убраны из обычной установки и вывода.
 - [x] Автоматический healthcheck использует RTSP `OPTIONS` и не будит upstream;
   глубокий `DESCRIBE` доступен через `check-streams`
   (→ [Модуль диагностики](../modules/healthcheck.md)).
@@ -165,14 +164,13 @@ unit/contract/architecture-тесты и статические проверки
 - [x] На реальных исходных RTSP подтверждены H.264, AAC-LC 48 kHz mono,
   keyframe примерно раз в секунду и нестабильные DTS.
 - [ ] VLC: видео и наличие аудиодорожки.
-- [ ] SprutHub: стабильность H.264 CFR, `pcma`, затем при необходимости `pcmu`.
+- [ ] SprutHub: стабильность H.264 copy и PCMU.
 - [ ] SprutHub: получение snapshot по напечатанному HTTP URL.
 
 ### Rollback
 
-Установить `VIDEO_MODE=copy`, `AUDIO_MODE=copy` или `none` и выполнить
-`./manage.sh refresh`; публичные URL и go2rtc не останавливаются. Полный Git
-rollback возвращает прежний media profile.
+Вернуть предыдущий Git revision и повторно выполнить installer. Публичные
+базовые URL и UID mapping сохраняются.
 
 ## Фаза 7 — Передача и расширение
 
