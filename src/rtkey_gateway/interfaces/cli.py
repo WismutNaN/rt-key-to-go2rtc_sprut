@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from typing import BinaryIO
 from urllib.parse import quote
 
 from rtkey_gateway.application.access_control import AccessControlService
@@ -32,6 +33,10 @@ from rtkey_gateway.infrastructure.rtkey import (
 )
 from rtkey_gateway.infrastructure.rtsp_probe import Go2RtcRtspProbe
 from rtkey_gateway.infrastructure.secrets import FileAccessTokenSource
+from rtkey_gateway.infrastructure.spruthub_templates import (
+    build_spruthub_access_templates,
+    build_spruthub_template_archive,
+)
 from rtkey_gateway.interfaces.snapshot_http import SnapshotHttpService
 
 
@@ -230,6 +235,16 @@ def command_access_show(container: Container) -> int:
     if state.last_success_at is None:
         print("Access devices have not been discovered yet.", file=sys.stderr)
         return 2
+    bindings = sorted(
+        (binding for binding in state.bindings.values() if binding.present),
+        key=lambda item: item.mqtt_key.value,
+    )
+    if not bindings:
+        print(
+            "No intercoms or barriers are available for this account.",
+            file=sys.stderr,
+        )
+        return 2
 
     print("==========================================")
     print("SprutHub MQTT access control")
@@ -238,28 +253,48 @@ def command_access_show(container: Container) -> int:
     print(f"Username: {settings.mqtt_username}")
     print(f"Password: {settings.mqtt_password}")
     print(f"Topic prefix: {settings.mqtt_topic_prefix}")
-    print("Template: spruthub/rtkey_access_v2.json")
+    print("Template export: ./manage.sh access-templates")
     print()
-    bindings = sorted(
-        (binding for binding in state.bindings.values() if binding.present),
-        key=lambda item: item.mqtt_key.value,
-    )
-    if not bindings:
-        print("No intercoms or barriers are available for this account.")
+    templates = {
+        template.mqtt_key: template
+        for template in build_spruthub_access_templates(
+            bindings, settings.mqtt_topic_prefix
+        )
+    }
     for binding in bindings:
         point = binding.point
-        print(f"Device: {point.title}")
+        template = templates[binding.mqtt_key.value]
+        print(f"Place: {template.display_name}")
         print(f"Type: {point.kind.value}")
         print(f"Device ID: {point.point_id.value}")
         if point.camera_id:
             print(f"Camera ID: {point.camera_id}")
         print(f"MQTT key: {binding.mqtt_key.value}")
+        print(f"Template file: {template.filename}")
         print(
             "Command topic: "
             f"{settings.mqtt_topic_prefix}/access/{binding.mqtt_key.value}/set"
         )
         print()
     print("==========================================")
+    return 0
+
+
+def command_export_access_templates(
+    container: Container,
+    output: BinaryIO | None = None,
+) -> int:
+    settings = container.settings
+    if settings.access_control != "mqtt" or container.access_repository is None:
+        raise GatewayError("MQTT access control is disabled")
+    state = container.access_repository.load()
+    templates = build_spruthub_access_templates(
+        state.bindings.values(), settings.mqtt_topic_prefix
+    )
+    if not templates:
+        raise GatewayError("No access devices are available for template export")
+    target = output if output is not None else sys.stdout.buffer
+    target.write(build_spruthub_template_archive(templates))
     return 0
 
 
@@ -355,6 +390,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "sync-once",
             "show",
             "access-show",
+            "export-access-templates",
             "status",
             "healthcheck",
             "deep-healthcheck",
@@ -376,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
             "sync-once": command_sync_once,
             "show": command_show,
             "access-show": command_access_show,
+            "export-access-templates": command_export_access_templates,
             "status": command_status,
             "healthcheck": command_healthcheck,
             "deep-healthcheck": command_deep_healthcheck,

@@ -13,6 +13,8 @@ Usage: ./manage.sh <command>
 Commands:
   show          Show credentials, RTSP URLs, and snapshot URLs
   access        Show MQTT credentials and discovered access devices
+  access-templates
+                Export one named SprutHub template per access device
   status        Show containers and sanitized controller state
   media-status  Show one-time CPU, memory, and process counters
   check-streams Actively check every upstream (temporarily starts media)
@@ -28,7 +30,7 @@ USAGE
 COMMAND="${1:-}"
 case "$COMMAND" in
     -h|--help|help|"") usage; exit 0 ;;
-    show|access|status|media-status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
+    show|access|access-templates|status|media-status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
     *)
         echo "Unknown command: $COMMAND" >&2
         usage
@@ -47,6 +49,43 @@ case "$COMMAND" in
         ;;
     access)
         exec docker compose exec -T controller python -m rtkey_gateway access-show
+        ;;
+    access-templates)
+        command -v tar >/dev/null 2>&1 || {
+            echo "The tar utility is required to export SprutHub templates." >&2
+            exit 1
+        }
+        umask 077
+        generated_root="$ROOT_DIR/generated"
+        if ! mkdir -p -- "$generated_root"; then
+            echo "Could not create the template output directory." >&2
+            exit 1
+        fi
+        if ! output_dir="$(
+            mktemp -d "$generated_root/spruthub-access-$(date -u +%Y%m%d-%H%M%S)-XXXXXX"
+        )"; then
+            echo "Could not create a unique template output directory." >&2
+            exit 1
+        fi
+        if ! docker compose exec -T controller \
+            python -m rtkey_gateway export-access-templates \
+            | tar -xf - -C "$output_dir"; then
+            echo "Template export failed. Partial output was left at:" >&2
+            echo "$output_dir" >&2
+            exit 1
+        fi
+        mapfile -t template_files < <(
+            find "$output_dir" -maxdepth 1 -type f -name '*.json' -print | sort
+        )
+        if (( ${#template_files[@]} == 0 )); then
+            echo "Template export returned no JSON files." >&2
+            exit 1
+        fi
+        echo "SprutHub access templates created:"
+        printf '%s\n' "${template_files[@]}"
+        echo
+        echo "Import every JSON file into the SprutHub MQTT catalog."
+        echo "Each device and its button will use the Rostelecom place name."
         ;;
     status)
         docker compose ps

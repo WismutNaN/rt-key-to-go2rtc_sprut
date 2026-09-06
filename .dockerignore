@@ -6,6 +6,7 @@ data
 __pycache__
 *.pyc
 archive
+generated
 docs
 modules
 tests

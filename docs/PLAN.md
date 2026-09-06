@@ -208,15 +208,15 @@ unit/contract/architecture-тесты и статические проверки
 
 - [x] Отдельные domain types, application ports и JSON state Access Control.
 - [x] Независимые endpoint `intercom`/`barrier`, partial refresh и generic open.
-- [x] Paho MQTT 2.1.0, reconnect, retained discovery и актуальный SprutHub template.
+- [x] Paho MQTT 2.1.0, reconnect, retained discovery и exact-topic шаблон каждого места.
 - [x] Запрет retained open, allowlist каталога, bounded queue, duplicate detection и cooldown.
 - [x] Режим `off` не создаёт worker, MQTT client и provider calls.
-- [x] Installer/manager печатают настройки и соответствие provider title → MQTT key.
+- [x] Installer/manager печатают настройки и генерируют именованные SprutHub templates.
 
 ### Проверка
 
 - [x] Unit/contract-тесты domain, API mapping, state, MQTT topics и open policy.
-- [ ] Импортировать `spruthub/rtkey_access_v2.json` и обнаружить все retained устройства.
+- [ ] Импортировать все файлы из `generated/spruthub-access-*` и обнаружить retained устройства.
 - [ ] Проверить по одному открытию домофона и шлагбаума с безопасного места.
 - [ ] Отключить broker, убедиться в сохранении видео и автоматическом reconnect.
 

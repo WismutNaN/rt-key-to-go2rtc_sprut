@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import tarfile
 import time
 import unittest
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from rtkey_gateway.domain import (
 )
 from rtkey_gateway.interfaces.cli import (
     command_access_show,
+    command_export_access_templates,
     command_healthcheck,
     command_show,
 )
@@ -154,9 +156,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         rendered = output.getvalue()
         self.assertIn("SprutHub MQTT access control", rendered)
-        self.assertIn("Template: spruthub/rtkey_access_v2.json", rendered)
-        self.assertIn("Device: Подъезд 1", rendered)
+        self.assertIn("Template export: ./manage.sh access-templates", rendered)
+        self.assertIn("Place: Подъезд 1", rendered)
+        self.assertIn("Template file: rtkey_", rendered)
         self.assertIn(f"MQTT key: {binding.mqtt_key.value}", rendered)
+
+        archive_data = io.BytesIO()
+        self.assertEqual(command_export_access_templates(container, archive_data), 0)
+        with tarfile.open(fileobj=io.BytesIO(archive_data.getvalue())) as archive:
+            self.assertEqual(len(archive.getnames()), 1)
 
 
 if __name__ == "__main__":
