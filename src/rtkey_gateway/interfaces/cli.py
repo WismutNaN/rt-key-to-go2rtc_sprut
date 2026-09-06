@@ -134,30 +134,26 @@ def command_show(container: Container) -> int:
     host = _format_rtsp_host(settings.rtsp_host)
 
     print("==========================================")
-    print("Данные камер для SprutHub")
+    print("SprutHub camera connection data")
     print("==========================================")
-    print(f"Логин:  {settings.rtsp_username}")
-    print(f"Пароль: {settings.rtsp_password}")
+    print(f"Username: {settings.rtsp_username}")
+    print(f"Password: {settings.rtsp_password}")
     print()
     for binding in sorted(cameras, key=lambda item: item.stream_name.value):
-        print(f"{binding.title} [{binding.camera_id.value}]:")
+        print(f"Camera: {binding.title} [{binding.camera_id.value}]")
+        print(f"Stream name: {binding.stream_name.value}")
         for variant in settings.media_policy.variants_for(
             binding.camera_id.value,
             base_profile=binding.last_good_profile,
         ):
             stream_name = variant.stream_name_value(binding.stream_name.value)
-            resolution = (
-                "исходное разрешение"
-                if variant.resolution.width is None
-                else variant.resolution.key
-            )
-            print(f"Вариант: {resolution}")
-            print("RTSP:")
+            print(f"Resolution: {variant.resolution.key}")
+            print("RTSP URL:")
             print(
                 f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"
                 f"{stream_name}"
             )
-            print("Snapshot:")
+            print("Snapshot URL:")
             print(
                 f"http://{user}:{password}@{host}:{settings.snapshot_port}/snapshot/"
                 f"{stream_name}.jpg"

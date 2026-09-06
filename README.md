@@ -1,231 +1,151 @@
-# Ростелеком Ключ → RTSP для SprutHub
+# Rostelecom Key to RTSP/Snapshot for SprutHub
 
-Проект автоматически находит все камеры аккаунта «Ростелеком Ключ» и публикует их как постоянные RTSP-потоки с логином и паролем. Временные `streamer_token` обновляются перед реальным JWT `exp` через API go2rtc — без перезапуска RTSP-сервера.
+Шлюз публикует все камеры аккаунта «Ростелеком Ключ» как постоянные
+RTSP-потоки и JPEG snapshot URL. Временные токены камер обновляются
+без перезапуска RTSP-сервера.
 
-Интеграция неофициальная. Используйте её только для камер и устройств, к которым у вас есть законный доступ.
+> Интеграция неофициальная. Используйте её только для своих камер.
 
-## Что исправлено
+## Что вы получите
 
-- Новый и старый camera API опрашиваются через независимые адаптеры: новый имеет
-  приоритет, старый дополняет отсутствующие UID и остаётся fallback при ошибке.
-- Адрес медиасервера извлекается из `streamerUrl`, `live-vdk4` не зашит.
-- Понятное имя строится из `title` и навсегда закрепляется за UID камеры.
-- Source меняется через `PATCH /api/streams`; go2rtc не перезапускается.
-- Новый source проверяется через RTSP `DESCRIBE`; при ошибке возвращается полный last-known-good, включая аудиопрофиль.
-- Один и тот же source не отправляется повторным `PATCH`, поэтому плановый refresh
-  не обрывает активный RTSP-сеанс, если Ростелеком ещё не выдал новый token.
-- RTSP требует отдельные credentials SprutHub.
-- API go2rtc защищён Basic Auth и не публикуется в локальную сеть.
-- Для каждой камеры выдаётся защищённый HTTP snapshot URL; наружу не открывается
-  общий API или Web UI go2rtc.
-- Версия go2rtc закреплена: `1.9.14`.
-- По умолчанию неровные timestamps Ростелекома нормализуются в H.264 CFR 30 fps,
-  а AAC преобразуется в совместимый с RTSP `PCMA`.
-- FFmpeg остаётся ленивым: обработка запускается только при RTSP-просмотре,
-  snapshot-запросе или явной глубокой проверке и останавливается без потребителей.
+- стабильные имена камер, закреплённые за camera UID;
+- RTSP с отдельным логином и паролем;
+- JPEG snapshot URL с той же авторизацией;
+- варианты `source`, `1280x720` и `640x360`;
+- ленивую обработку: FFmpeg работает только пока есть зритель или snapshot-запрос.
 
 ## Требования
 
-- Linux-сервер `amd64` или `arm64` в одной локальной сети со SprutHub.
-- Docker Engine и Compose plugin (`docker compose`).
-- Bearer Token от «Ростелеком Ключ».
+- Linux `amd64` или `arm64` в одной локальной сети со SprutHub;
+- Docker Engine и Compose plugin (`docker compose`);
+- Authorization token от «Ростелеком Ключ».
 
-Сам проект не устанавливает Docker и не изменяет firewall.
+### Установка Docker
+
+Для постоянного сервера установите Docker Engine и Compose plugin по
+[официальной инструкции](https://docs.docker.com/engine/install/). Быстрый способ для
+тестового/домашнего Linux-сервера:
+
+```bash
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker "$USER"
+```
+
+Перевойдите в систему заново и проверьте:
+
+```bash
+docker version
+docker compose version
+```
+
+## Как получить Authorization token
+
+1. Откройте <https://key.rt.ru/main/pwa/dashboard> и войдите в аккаунт.
+2. Нажмите `F12` и откройте вкладку `Network` / `Сеть`.
+3. Введите `barrier` в строке поиска.
+4. Откройте GET-запрос и найдите `Headers` → `Request Headers` → `Authorization`.
+5. Скопируйте всё значение. Префикс `Bearer` можно оставить.
 
 ## Быстрый старт
 
 ```bash
 git clone https://github.com/WismutNaN/rt-key-to-go2rtc_sprut.git
 cd rt-key-to-go2rtc_sprut
-./install.sh
-```
-
-Если сервер не определил правильный LAN IP:
-
-```bash
 ./install.sh --server-ip 192.168.1.50
 ```
 
-Для автоматической установки:
+Установщик запросит token, создаст пароль, запустит два контейнера и
+напечатает все ссылки. `--server-ip` — LAN IP этого Docker-сервера;
+его можно не указывать, если автоопределение работает верно.
+
+Рекомендуемый явный профиль:
 
 ```bash
-ACCESS_TOKEN='eyJ...' ./install.sh --server-ip 192.168.1.50
+./install.sh --server-ip 192.168.1.50 \
+  --audio pcma --video h264 --fps 30 \
+  --resolutions source,1280x720,640x360 \
+  --probe-workers 1 --snapshot-workers 2
 ```
 
-Bearer Token сохраняется отдельно от `.env` в закрытом каталоге
-`secrets/rtkey_access_token`. Каталог имеет права `0700`; файл доступен
-controller только как Compose file secret и не попадает ни в окружение
-контейнера, ни в Git или Docker build context. Установщик автоматически
-перенесёт токен из `.env`, если обновляется более ранняя версия проекта.
-Чтобы получить токен:
-
-1. Откройте <https://key.rt.ru/main/pwa/dashboard> и войдите.
-2. Откройте `F12` → `Network`.
-3. Найдите запрос `barrier`.
-4. Скопируйте значение заголовка `Authorization` после слова `Bearer`.
-
-После первого успешного обнаружения установщик напечатает все камеры:
+Пример вывода. Все наши заголовки и подписи печатаются по-английски;
+название камеры выводится в исходном виде, как его вернул провайдер:
 
 ```text
 ==========================================
-Данные камер для SprutHub
+SprutHub camera connection data
 ==========================================
-Логин:  spruthub
-Пароль: <случайный пароль>
+Username: spruthub
+Password: <generated-password>
 
-Подъезд [camera-uid]:
-Вариант: исходное разрешение
-RTSP:
-rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd
-Snapshot:
-http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd.jpg
+Camera: Подъезд [camera-uid]
+Stream name: podezd
+Resolution: source
+RTSP URL:
+rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd
+Snapshot URL:
+http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 
-Вариант: 1280x720
-RTSP:
-rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd_1280x720
-Snapshot:
-http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd_1280x720.jpg
-
-Вариант: 640x360
-RTSP:
-rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd_640x360
-Snapshot:
-http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd_640x360.jpg
+Resolution: 1280x720
+RTSP URL:
+rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd_1280x720
+Snapshot URL:
+http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd_1280x720.jpg
 ==========================================
 ```
 
-Первая ссылка добавляется в SprutHub как обычная RTSP-камера, вторая — в поле
-snapshot той же камеры. ONVIF не требуется. Обе ссылки используют один логин и
-пароль.
+В SprutHub добавьте **один** RTSP-вариант каждой физической камеры и
+соответствующий snapshot URL. ONVIF не нужен. Все URL можно повторно
+показать командой `./manage.sh show`.
+
+## Разрешение и нагрузка
+
+`source` сохраняет исходное разрешение. `1280x720` и `640x360` снижают нагрузку
+на encoder во время просмотра, но входной 1080p всё равно нужно декодировать.
+Начните с `1280x720`; для слабого CPU попробуйте также `--fps 15`.
+
+Каждый открытый вариант запускает отдельную обработку. Не добавляйте все
+три разрешения одной камеры в SprutHub: его snapshot polling создаст лишнюю нагрузку.
+
+## Аудио
+
+По умолчанию AAC-LC из upstream преобразуется в более совместимый с RTSP формат
+`PCMA`. Доступны `pcma`, `pcmu`, `aac`, `copy`, `none`. Если SprutHub видит кодек,
+но не показывает звук, проверьте ту же RTSP-ссылку в VLC. Звук в VLC при
+его отсутствии в SprutHub означает ограничение RTSP-поддержки SprutHub.
 
 ## Управление
 
 ```bash
-./manage.sh show       # повторно показать RTSP и snapshot-ссылки
-./manage.sh status     # контейнеры и безопасный статус камер
-./manage.sh check-streams # разово запустить и глубоко проверить все потоки
-./manage.sh logs       # безопасные логи controller
-./manage.sh logs-media # go2rtc/FFmpeg; перед публикацией удалить токены
-./manage.sh refresh    # обновить камеры, не останавливая go2rtc
-./manage.sh set-token  # заменить истёкший Bearer Token
-./manage.sh down       # остановить контейнеры, сохранив состояние
-./manage.sh up         # запустить снова
+./manage.sh show          # RTSP and snapshot URLs
+./manage.sh status        # containers and camera state
+./manage.sh check-streams # active test of every stream
+./manage.sh refresh       # refresh camera data without restarting go2rtc
+./manage.sh logs          # controller logs
+./manage.sh logs-media    # FFmpeg diagnostics; URLs may contain tokens
+./manage.sh set-token     # replace an expired Authorization token
+./manage.sh down
+./manage.sh up
 ```
 
-Обычное удаление сохраняет секреты и состояние:
+Измените параметры повторным запуском `install.sh` с нужными флагами.
+Скрипт сохраняет credentials и найденные имена камер.
+
+## Безопасность и ограничения
+
+- RTSP `8554` и snapshot HTTP `8080` защищены Basic Auth, но трафик не шифруется.
+  Не публикуйте эти порты в Интернет; в LAN ограничьте firewall IP-адресом SprutHub.
+- API go2rtc `1984` не публикуется на Docker-host.
+- Authorization token может быть отозван провайдером; замените его через
+  `./manage.sh set-token`.
+- Обычный healthcheck не запускает media. `check-streams` запускает все потоки
+  на время проверки.
+
+Подробная диагностика: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## Удаление
 
 ```bash
-./uninstall.sh
+./uninstall.sh         # keep credentials and state
+./uninstall.sh --purge # also remove credentials and Docker volume
 ```
-
-Полное удаление, включая Docker volume и credentials:
-
-```bash
-./uninstall.sh --purge
-```
-
-## Аудио
-
-В проверенном upstream есть корректная дорожка AAC-LC, 48 kHz, mono, но её
-уровень очень низкий. Кроме того, официальный статус поддержки RTSP-камер в
-SprutHub всё ещё допускает частичную работу без звука. Поэтому для новых
-установок выбран наиболее совместимый режим:
-
-```dotenv
-AUDIO_MODE=pcma
-```
-
-Допустимы `pcma`, `pcmu`, `aac`, `copy`, `none`. После изменения выполните:
-
-```bash
-./manage.sh refresh
-```
-
-Аудио настраивается независимо от видео. Для индивидуальных настроек камер
-предусмотрен `AUDIO_OVERRIDES_JSON`, например:
-
-```dotenv
-AUDIO_OVERRIDES_JSON={"camera-uid-1":"aac","camera-uid-2":"pcma"}
-```
-
-Если SprutHub видит codec, но не показывает кнопку звука, сначала оставьте
-`pcma`, пересоздайте controller и заново добавьте RTSP-камеру. Наличие дорожки в
-VLC при отсутствии управления в SprutHub указывает уже на ограничение его
-beta-интеграции, а не на отсутствие аудио в шлюзе.
-
-## Видео и нагрузка
-
-По умолчанию используется `VIDEO_MODE=h264`: видео перекодируется в стабильный
-H.264 CFR только во время просмотра. Это устраняет диагностированные скачки DTS,
-которые проявлялись зелёным экраном. При отсутствии потребителей процесс FFmpeg
-не работает и CPU на декодирование камер не расходуется.
-
-Установщик создаёт три ленивых варианта на каждую камеру:
-
-```dotenv
-VIDEO_RESOLUTIONS=source,1280x720,640x360
-```
-
-Тот же список можно задать при установке параметром
-`--resolutions source,1280x720,640x360` (от одного до четырёх вариантов,
-`source` должен идти первым).
-
-`source` сохраняет исходный размер (в проверенных потоках — 1920x1080), а каждый
-из остальных вариантов масштабируется и кодируется одним FFmpeg-процессом.
-Декодировать входной 1080p всё равно необходимо, но encoder обрабатывает на 56%
-меньше пикселей для 720p и на 89% меньше для 360p. Поэтому снижение нагрузки
-обычно заметно во время просмотра, хотя точное значение зависит от CPU.
-
-Каждый вариант имеет отдельный постоянный URL и остаётся выключенным до его
-открытия. Если одновременно открыть разные разрешения одной камеры, будут
-работать отдельные FFmpeg-процессы и подключения к upstream.
-
-Если конкретная камера стабильно работает в SprutHub без нормализации, можно
-отключить видеодекодирование и кодирование для неё по UID:
-
-```dotenv
-VIDEO_OVERRIDES_JSON={"camera-uid":"copy"}
-```
-
-Глобальный `VIDEO_MODE=copy` даёт минимальную нагрузку даже во время просмотра,
-но возвращает исходные неровные timestamps и поэтому не рекомендуется для уже
-наблюдавшихся зелёных экранов. `VIDEO_FPS=30` задаёт CFR/GOP стабильного профиля.
-Масштабированные варианты всегда используют H.264, потому что изменение размера
-несовместимо с `video=copy`.
-
-Для слабого CPU можно дополнительно задать `--fps 15`: это снижает число
-кодируемых кадров, но делает движение менее плавным. Сначала разумно проверить
-720p/30, затем 720p/15.
-
-## Устройство
-
-Используются два контейнера:
-
-```text
-Ростелеком API → controller → внутренний API go2rtc → RTSP :8554 → SprutHub
-                         PATCH /api/streams       └→ JPEG → snapshot :8080
-```
-
-- `controller` отвечает за API-версии, токены, постоянные имена, проверку
-  upstream, состояние и узкий Basic-auth snapshot endpoint.
-- `go2rtc` отвечает только за media/RTSP.
-- Порт `1984` отсутствует в `ports` Compose и недоступен устройствам LAN.
-- Наружу публикуются `8554/tcp` (RTSP) и `8080/tcp` (только JPEG snapshot), оба
-  с одной отдельной авторизацией SprutHub.
-
-Архитектура — модульный DDD-lite с ports/adapters. Изменение API Ростелекома изолировано в versioned strategies. Управление дверьми/шлагбаумами и звонки предусмотрены как отдельные будущие bounded contexts, а не как методы видеоклиента.
-
-Подробности:
-
-- [Архитектура](docs/ARCHITECTURE.md)
-- [План миграции](docs/PLAN.md)
-- [Первый запуск и диагностика](docs/TROUBLESHOOTING.md)
-- [ADR по доменным границам](docs/adr/0006-domain-boundaries.md)
-
-## Ограничения
-
-- Основной Bearer Token нельзя надёжно обновить автоматически из-за неофициального API и возможной captcha.
-- Поддержка камер в SprutHub находится в beta; фактическая совместимость звука
-  проверяется на конкретной версии хаба.
-- Первый реальный запуск и проверка RTSP выполняются на целевом Docker-сервере.
-- `archive/` — отдельная legacy/experimental-утилита и не входит в новое Docker-развёртывание.

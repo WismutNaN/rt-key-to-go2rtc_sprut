@@ -16,23 +16,24 @@ cd rt-key-to-go2rtc_sprut
 
 ```text
 ==========================================
-Данные камер для SprutHub
+SprutHub camera connection data
 ==========================================
-Логин:  spruthub
-Пароль: <случайный пароль>
+Username: spruthub
+Password: <generated-password>
 
-Подъезд [camera-uid]:
-Вариант: исходное разрешение
-RTSP:
-rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd
-Snapshot:
-http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd.jpg
+Camera: Подъезд [camera-uid]
+Stream name: podezd
+Resolution: source
+RTSP URL:
+rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd
+Snapshot URL:
+http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 
-Вариант: 1280x720
-RTSP:
-rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd_1280x720
-Snapshot:
-http://spruthub:<пароль>@192.168.1.50:8080/snapshot/podezd_1280x720.jpg
+Resolution: 1280x720
+RTSP URL:
+rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd_1280x720
+Snapshot URL:
+http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd_1280x720.jpg
 ==========================================
 ```
 

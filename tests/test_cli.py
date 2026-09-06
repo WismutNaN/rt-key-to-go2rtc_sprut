@@ -64,6 +64,11 @@ class CliTests(unittest.TestCase):
             result = command_show(container)
         self.assertEqual(result, 0)
         rendered = output.getvalue()
+        self.assertIn("SprutHub camera connection data", rendered)
+        self.assertIn("Username: spruthub", rendered)
+        self.assertIn("Camera: Подъезд [uid]", rendered)
+        self.assertIn("Stream name: podezd", rendered)
+        self.assertIn("Resolution: source", rendered)
         self.assertIn("rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd", rendered)
         self.assertIn(
             "http://spruthub:rtsp-password@192.168.50.99:8080/snapshot/podezd.jpg",
