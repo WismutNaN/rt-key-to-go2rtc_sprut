@@ -44,7 +44,12 @@ cd rt-key-to-go2rtc_sprut
 ACCESS_TOKEN='eyJ...' ./install.sh --server-ip 192.168.1.50
 ```
 
-Bearer Token сохраняется в закрытом `.env` с правами `0600`, передаётся controller как Compose secret-файл и не попадает ни в окружение контейнера, ни в Git. Чтобы получить токен:
+Bearer Token сохраняется отдельно от `.env` в закрытом каталоге
+`secrets/rtkey_access_token`. Каталог имеет права `0700`; файл доступен
+controller только как Compose file secret и не попадает ни в окружение
+контейнера, ни в Git или Docker build context. Установщик автоматически
+перенесёт токен из `.env`, если обновляется более ранняя версия проекта.
+Чтобы получить токен:
 
 1. Откройте <https://key.rt.ru/main/pwa/dashboard> и войдите.
 2. Откройте `F12` → `Network`.

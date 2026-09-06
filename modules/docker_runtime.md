@@ -29,6 +29,8 @@
 - Privileged, host network и GPU не требуются для режима copy.
 - RTSP-сервер go2rtc выдаёт RTP interleaved по TCP; WebRTC отключён, поэтому bridge-сети и одного TCP mapping достаточно.
 - Controller запускается не от root и получает state directory на запись.
+- Bearer передаётся controller только как file-backed Compose secret; source
+  `environment` не используется из-за различий реализаций Compose.
 - Каталог `/config` go2rtc явно монтируется read-only, не создавая анонимный volume; runtime streams восстанавливает controller.
 - Docker JSON-логи ограничены по размеру и числу файлов.
 

@@ -26,9 +26,12 @@ jobs:
           python -m unittest discover -v
 
       - name: Check shell syntax
-        run: bash -n install.sh manage.sh uninstall.sh
+        run: bash -n install.sh manage.sh uninstall.sh scripts/secrets.sh
 
       - name: Validate Compose model without starting containers
         run: |
           cp .env.example .env
+          mkdir -m 700 secrets
+          printf 'test.header.signature' > secrets/rtkey_access_token
+          chmod 444 secrets/rtkey_access_token
           docker compose config --quiet

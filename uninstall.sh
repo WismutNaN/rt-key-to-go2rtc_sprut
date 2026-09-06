@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/secrets.sh"
 
 PURGE=0
 case "${1:-}" in
@@ -22,7 +23,8 @@ if (( PURGE )); then
     read -rp "Продолжить? [y/N] " answer
     [[ "$answer" == [yY]* ]] || { echo "Отменено."; exit 0; }
     docker compose down --volumes --remove-orphans
-    rm -f -- .env
+    rm -f -- .env "$ACCESS_TOKEN_FILE"
+    rmdir -- "$SECRET_DIR" 2>/dev/null || true
     echo "Развёртывание и локальные секреты удалены без возможности восстановления."
 else
     docker compose down --remove-orphans

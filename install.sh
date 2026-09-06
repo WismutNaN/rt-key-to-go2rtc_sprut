@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/secrets.sh"
 chmod +x manage.sh uninstall.sh 2>/dev/null || true
 
 read_env() {
@@ -12,6 +13,8 @@ read_env() {
     sed -n "s/^${key}=//p" .env | tail -n 1
 }
 
+ACCESS_TOKEN="${ACCESS_TOKEN:-$(read_access_token_secret)}"
+# One-time migration for installations created before file-backed secrets.
 ACCESS_TOKEN="${ACCESS_TOKEN:-$(read_env RTKEY_ACCESS_TOKEN)}"
 SERVER_IP="${SERVER_IP:-$(read_env SERVER_IP)}"
 RTSP_PORT="${RTSP_PORT:-$(read_env RTSP_PORT)}"
@@ -75,14 +78,6 @@ esac
     exit 2
 }
 
-normalize_token() {
-    ACCESS_TOKEN="$(printf '%s' "$ACCESS_TOKEN" | tr -d '\r\n')"
-    if [[ "${ACCESS_TOKEN,,}" == bearer\ * ]]; then
-        ACCESS_TOKEN="${ACCESS_TOKEN:7}"
-    fi
-    [[ "$ACCESS_TOKEN" =~ ^[A-Za-z0-9._~-]+$ ]]
-}
-
 if [[ -z "$ACCESS_TOKEN" ]]; then
     [[ -t 0 ]] || {
         echo "Передайте токен через --token или ACCESS_TOKEN." >&2
@@ -94,10 +89,10 @@ if [[ -z "$ACCESS_TOKEN" ]]; then
     read -rsp "Вставьте Bearer Token: " ACCESS_TOKEN
     echo
 fi
-normalize_token || {
-    echo "Bearer Token пуст или содержит символы, недопустимые для JWT/.env." >&2
+if ! ACCESS_TOKEN="$(normalize_access_token "$ACCESS_TOKEN")"; then
+    echo "Bearer Token пуст или содержит символы, недопустимые для JWT." >&2
     exit 2
-}
+fi
 
 random_secret() {
     od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
@@ -158,11 +153,11 @@ TIMEZONE="$(read_env TZ)"
 TIMEZONE="${TZ:-${TIMEZONE:-Asia/Yekaterinburg}}"
 
 umask 077
+write_access_token_secret "$ACCESS_TOKEN"
 ENV_TMP=".env.$$"
 trap 'rm -f -- "$ENV_TMP"' EXIT
 cat > "$ENV_TMP" <<EOF
 TZ=$TIMEZONE
-RTKEY_ACCESS_TOKEN=$ACCESS_TOKEN
 SERVER_IP=$SERVER_IP
 RTSP_BIND_IP=$RTSP_BIND_IP
 RTSP_PORT=$RTSP_PORT

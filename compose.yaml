@@ -65,11 +65,7 @@ services:
       HEALTH_MAX_STALE_SECONDS: ${HEALTH_MAX_STALE_SECONDS:-21600}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     secrets:
-      - source: rtkey_access_token
-        target: rtkey_access_token
-        uid: "10001"
-        gid: "10001"
-        mode: 0400
+      - rtkey_access_token
     volumes:
       - gateway-state:/data
     tmpfs:
@@ -100,4 +96,4 @@ volumes:
 
 secrets:
   rtkey_access_token:
-    environment: RTKEY_ACCESS_TOKEN
+    file: ./secrets/rtkey_access_token

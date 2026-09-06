@@ -111,10 +111,10 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("RTSP_PORT", compose)
         self.assertIn("alexxit/go2rtc:1.9.14", compose)
         self.assertNotIn("alexxit/go2rtc:latest", compose)
-        self.assertIn("environment: RTKEY_ACCESS_TOKEN", compose)
-        self.assertIn('uid: "10001"', compose)
-        self.assertIn("mode: 0400", compose)
-        self.assertNotIn("file: ./secrets/access_token", compose)
+        self.assertIn("file: ./secrets/rtkey_access_token", compose)
+        self.assertNotIn("environment: RTKEY_ACCESS_TOKEN", compose)
+        self.assertNotIn('uid: "10001"', compose)
+        self.assertNotIn("mode: 0400", compose)
         self.assertNotIn("env_file:", compose)
         controller = compose.split("  controller:", 1)[1].split("\nnetworks:", 1)[0]
         self.assertNotIn("RTKEY_ACCESS_TOKEN:", controller)
@@ -133,6 +133,9 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("secrets/", patterns)
         self.assertIn("data/", patterns)
         self.assertNotIn("\ngo2rtc.yaml\n", f"\n{patterns}\n")
+
+        dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+        self.assertIn("secrets", dockerignore)
 
 
 if __name__ == "__main__":
