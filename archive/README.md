@@ -1,5 +1,7 @@
 # Выгрузка архива камер key.rt.ru / camera.rt.ru
 
+> **Legacy/experimental:** этот инструмент не входит в Docker Video Gateway, использует отдельные зависимости и старый endpoint камер. Он сохранён как самостоятельная утилита, но не покрыт новым fallback/LKG/healthcheck и требует отдельной модернизации перед эксплуатацией.
+
 Скрипт [`rt_archive_export.py`](rt_archive_export.py) выгружает архивную запись с камеры
 в обычный `.mp4`.
 
@@ -16,8 +18,7 @@
 ← fMP4 фрагменты   (ftyp+moov один раз, далее moof+mdat ~0.5 c каждый)
 ```
 
-Авторизация — по тому же `access-token`, что и у основного скрипта
-`../rt_key_to_go2rtc.py`. По токену скрипт сам получает свежий
+Авторизация — по Bearer Token аккаунта. По токену скрипт сам получает свежий
 `streamer_token` камеры и адрес стрим-сервера, поэтому отдельно его указывать не нужно.
 
 ## Требования
@@ -120,14 +121,8 @@ tail -f archive/export.log
 
 ## Где взять camera id и access-token
 
-- **camera id** — поле `id` в `../cameras.json` (или из вывода `../rt_key_to_go2rtc.py`).
-  Список камер с названиями:
-  ```bash
-  python3 -c "import json;[print(c['id'], c['title']) for c in json.load(open('cameras.json'))['data']['items']]"
-  ```
-  ID можно посмотреть в браузере по F12 https://key.rt.ru/main/pwa/dashboard вкладка Network, socket смотреть wss://live-vdk4.camera.rt.ru/stream/<id камеры>/live.mp4?<другие параметры>
-- **access-token** — получается логином в `../rt_key_to_go2rtc.py` (`--phone`/`--password`)
-  или из существующей сессии. Действует долго (месяцы). Токен можно посмотреть в браузере по F12 https://key.rt.ru/main/pwa/dashboard запрос barrier, заголовок Authorization:Brearer <token>
+- **camera id** — UID из вывода `../manage.sh show`. Его также можно увидеть в браузере: F12 → Network на панели «Ростелеком Ключ».
+- **access-token** — берётся из существующей браузерной сессии: F12 → Network → запрос `barrier` → заголовок `Authorization: Bearer <token>`.
 
 
 ## Полезное

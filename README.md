@@ -1,223 +1,146 @@
-# RT Key → go2rtc Stream Generator
+# Ростелеком Ключ → RTSP для SprutHub
 
-This script fetches the list of cameras used in **Rostelecom Key** (“Ростелеком Ключ”) and generates **go2rtc-compatible stream configuration entries** for further streaming via **RTSP / WebRTC / HLS / MSE**.
+Проект автоматически находит все камеры аккаунта «Ростелеком Ключ» и публикует их как постоянные RTSP-потоки с логином и паролем. Временные `streamer_token` обновляются перед реальным JWT `exp` через API go2rtc — без перезапуска RTSP-сервера.
 
-The script automates the process of turning Rostelecom Key cloud cameras into local RTSP streams using **go2rtc**.
+Интеграция неофициальная. Используйте её только для камер и устройств, к которым у вас есть законный доступ.
 
----
+## Что исправлено
 
-## Quick install (go2rtc + auto-renew)
+- Новый camera API используется первым, старый остаётся fallback.
+- Адрес медиасервера извлекается из `streamerUrl`, `live-vdk4` не зашит.
+- Понятное имя строится из `title` и навсегда закрепляется за UID камеры.
+- Source меняется через `PATCH /api/streams`; go2rtc не перезапускается.
+- Новый source проверяется через RTSP `DESCRIBE`; при ошибке возвращается полный last-known-good, включая аудиопрофиль.
+- RTSP требует отдельные credentials SprutHub.
+- API go2rtc защищён Basic Auth и не публикуется в локальную сеть.
+- Версия go2rtc закреплена: `1.9.14`.
+- Видео передаётся с `video=copy`; аудиорежим можно менять отдельно.
 
-One command sets everything up: auto-detects the CPU architecture and downloads the
-matching go2rtc build (**amd64 / arm64 / arm / i386**), installs deps via `apt`
-(`python3`, `python3-requests`, `ffmpeg`, `curl`), installs a **systemd service**,
-and adds a **cron job** that refreshes the per-camera tokens every 6 hours (they
-expire after a few hours) and restarts go2rtc. Must be run as **root** (it
-re-execs via `sudo` automatically).
+## Требования
 
-```bash
-git clone https://github.com/MikeTuev/rt-key-to-go2rtc.git
-cd rt-key-to-go2rtc
-sudo ./install.sh
-```
+- Linux-сервер `amd64` или `arm64` в одной локальной сети со SprutHub.
+- Docker Engine и Compose plugin (`docker compose`).
+- Bearer Token от «Ростелеком Ключ».
 
-Interactive run asks for your **access-token** and prints where to find it. We use
-**token-only** auth — login by phone/password is **not** used because it can
-require a captcha.
+Сам проект не устанавливает Docker и не изменяет firewall.
 
-**Unattended install** (pass everything as parameters):
-
-```bash
-sudo ./install.sh --token eyJ... [--install-dir /opt/go2rtc] [--arch arm64] -y
-# or via env:  ACCESS_TOKEN=eyJ... INSTALL_DIR=/opt/go2rtc sudo -E ./install.sh -y
-```
-
-**Uninstall** (removes service, cron, install dir + token):
+## Быстрый старт
 
 ```bash
-sudo ./uninstall.sh           # add -y to skip the confirmation
+git clone https://github.com/WismutNaN/rt-key-to-go2rtc_sprut.git
+cd rt-key-to-go2rtc_sprut
+./install.sh
 ```
 
-**Where to get the access-token (from the browser):**
-
-1. Open <https://key.rt.ru/main/pwa/dashboard> and log in.
-2. `F12` → **Network** tab.
-3. Find the `barrier` request and copy the header `Authorization: Bearer <TOKEN>`.
-4. The `<TOKEN>` is the long `eyJ...` string. (More detail in [archive/README.md](archive/README.md).)
-
-The token is stored only locally in `<INSTALL_DIR>/access_token` (chmod 600) and
-is **never** committed to the repo. Default `INSTALL_DIR` is `/opt/go2rtc`.
-
-After install, open the **go2rtc Web UI** in your browser:
-
-```
-http://localhost:1984
-```
-
-(or `http://<host-ip>:1984` from another device). RTSP streams are at
-`rtsp://localhost:8554/rt1`, `.../rt2`, … Manage the service with
-`systemctl status go2rtc` and `journalctl -u go2rtc -f`.
-
-The manual steps below are an alternative if you prefer to set things up by hand.
-
----
-
-## What the Script Does
-
-1. Authenticates to Rostelecom Key using **phone/password** or a ready **access_token**
-2. Retrieves the cameras list (`cameras.json`)
-3. Extracts camera IDs and streamer tokens
-4. Generates `ffmpeg:` stream entries for **go2rtc**
-
----
-
-## Output Example
-
-The script generates stream definitions like:
-
-```yaml
-streams:
-  rt1: ffmpeg:https://live-vdk4.camera.rt.ru/stream/<camera_id>/live.mp4?...&token=<streamer_token>
-  rt2: ffmpeg:...
-```
-
-These streams can then be exposed locally via RTSP or accessed through go2rtc Web UI.
-
----
-
-## Example `go2rtc.yaml`
-
-```yaml
-rtsp:
-  listen: ":8554"
-
-streams:
-  rt1: ffmpeg:...
-  rt2: ffmpeg:...
-```
-
----
-
-## Requirements
-
-* Python **3.8 or newer**
-* Python package: `requests`
-* `go2rtc` binary
-
-Install Python dependency:
+Если сервер не определил правильный LAN IP:
 
 ```bash
-pip install requests
+./install.sh --server-ip 192.168.1.50
 ```
 
----
-
-## Download go2rtc
-
-Download the latest release from GitHub:
-
-[https://github.com/AlexxIT/go2rtc/releases](https://github.com/AlexxIT/go2rtc/releases)
-
-Example for Linux x64:
+Для автоматической установки:
 
 ```bash
-wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64
-chmod +x go2rtc_linux_amd64
-mv go2rtc_linux_amd64 go2rtc
+ACCESS_TOKEN='eyJ...' ./install.sh --server-ip 192.168.1.50
 ```
 
----
+Bearer Token сохраняется в закрытом `.env` с правами `0600`, передаётся controller как Compose secret-файл и не попадает ни в окружение контейнера, ни в Git. Чтобы получить токен:
 
-## Usage
+1. Откройте <https://key.rt.ru/main/pwa/dashboard> и войдите.
+2. Откройте `F12` → `Network`.
+3. Найдите запрос `barrier`.
+4. Скопируйте значение заголовка `Authorization` после слова `Bearer`.
 
-### 1. Run the Script
+После первого успешного обнаружения установщик напечатает все камеры:
+
+```text
+==========================================
+Данные камер для SprutHub
+==========================================
+Логин:  spruthub
+Пароль: <случайный пароль>
+
+Подъезд [camera-uid]:
+rtsp://spruthub:<пароль>@192.168.1.50:8554/podezd
+
+Двор [camera-uid]:
+rtsp://spruthub:<пароль>@192.168.1.50:8554/dvor
+==========================================
+```
+
+Эти URL добавляются в SprutHub как обычные RTSP-камеры. ONVIF не требуется.
+
+## Управление
 
 ```bash
-python3 rt_key_to_go2rtc.py --phone 79123456789 --password your_password
+./manage.sh show       # повторно показать RTSP-ссылки
+./manage.sh status     # контейнеры и безопасный статус камер
+./manage.sh logs       # безопасные логи controller
+./manage.sh logs-media # go2rtc/FFmpeg; перед публикацией удалить токены
+./manage.sh refresh    # обновить камеры, не останавливая go2rtc
+./manage.sh set-token  # заменить истёкший Bearer Token
+./manage.sh down       # остановить контейнеры, сохранив состояние
+./manage.sh up         # запустить снова
 ```
 
-This command will:
-
-* Log in to Rostelecom Key
-* Fetch the cameras list
-* Print go2rtc stream entries to standard output
-
-Optional usage with files:
+Обычное удаление сохраняет секреты и состояние:
 
 ```bash
-python3 rt_key_to_go2rtc.py \
-  --phone 79123456789 \
-  --password your_password \
-  --save-json cameras.json \
-  --out streams.yaml
+./uninstall.sh
 ```
 
-Authorization with an existing token:
+Полное удаление, включая Docker volume и credentials:
 
 ```bash
-python3 rt_key_to_go2rtc.py --access-token your_access_token
+./uninstall.sh --purge
 ```
 
-Options:
+## Аудио
 
-* `--save-json` — save fetched cameras list to a file
-* `--out` — save generated go2rtc stream entries to a file
-* `--access-token` — use a pre-obtained token (instead of `--phone` + `--password`)
-* If `--out` is not specified, output is printed to the console
+По умолчанию используется `AUDIO_MODE=copy`: исходные видео и аудио передаются без перекодирования. Если SprutHub показывает видео без звука, измените в `.env` только эту строку:
 
----
-
-## Create `go2rtc.yaml`
-
-Minimal configuration example:
-
-```yaml
-rtsp:
-  listen: ":8554"
-
-streams:
+```dotenv
+AUDIO_MODE=aac
 ```
 
-Paste the generated stream entries under the `streams:` section.
-
----
-
-## Start go2rtc
+Допустимы `copy`, `aac`, `pcma`, `pcmu`, `none`. Затем выполните:
 
 ```bash
-./go2rtc
+./manage.sh refresh
 ```
 
----
+`video=copy` сохраняется при любом аудиорежиме. Для будущих индивидуальных настроек камер предусмотрен `AUDIO_OVERRIDES_JSON`, например:
 
-## Access Streams
+```dotenv
+AUDIO_OVERRIDES_JSON={"camera-uid-1":"aac","camera-uid-2":"pcma"}
+```
 
-### Web Interface
+## Устройство
 
-Open in browser:
+Используются два контейнера:
 
-[http://localhost:1984](http://localhost:1984)
+```text
+Ростелеком API → controller → внутренний API go2rtc → RTSP :8554 → SprutHub
+                         PATCH /api/streams
+```
 
-### RTSP Access
+- `controller` отвечает за API-версии, токены, постоянные имена, проверку upstream и состояние.
+- `go2rtc` отвечает только за media/RTSP.
+- Порт `1984` отсутствует в `ports` Compose и недоступен устройствам LAN.
+- Наружу публикуется только `8554/tcp` с авторизацией.
 
-Example RTSP URL:
+Архитектура — модульный DDD-lite с ports/adapters. Изменение API Ростелекома изолировано в versioned strategies. Управление дверьми/шлагбаумами и звонки предусмотрены как отдельные будущие bounded contexts, а не как методы видеоклиента.
 
-rtsp://localhost:8554/rt1
+Подробности:
 
----
+- [Архитектура](docs/ARCHITECTURE.md)
+- [План миграции](docs/PLAN.md)
+- [Первый запуск и диагностика](docs/TROUBLESHOOTING.md)
+- [ADR по доменным границам](docs/adr/0006-domain-boundaries.md)
 
-## Notes
+## Ограничения
 
-* If something wrong please make sure you can login here https://key.rt.ru/main/pwa/dashboard
-* A **random `x-device-id` UUID** is generated on each login
-* `streamer_token` is automatically URL-encoded
-* Only cameras available in your Rostelecom Key account are included
-* Credentials or tokens are passed via command line — be careful with shell history
-* Inspired by https://github.com/IokReal/intercom_for_rtc
-
----
-
-## Disclaimer
-
-This project is **unofficial** and not affiliated with Rostelecom.
-Use it only with accounts and cameras you are authorized to access.
+- Основной Bearer Token нельзя надёжно обновить автоматически из-за неофициального API и возможной captcha.
+- Фактическая совместимость аудиокодека проверяется на конкретной версии SprutHub.
+- Первый реальный запуск и проверка RTSP выполняются на целевом Docker-сервере.
+- `archive/` — отдельная legacy/experimental-утилита и не входит в новое Docker-развёртывание.

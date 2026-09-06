@@ -1,0 +1,103 @@
+name: rtkey-go2rtc
+
+services:
+  go2rtc:
+    image: alexxit/go2rtc:1.9.14
+    restart: unless-stopped
+    user: "65534:65534"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      TZ: ${TZ:-Asia/Yekaterinburg}
+      GO2RTC_API_USERNAME: ${GO2RTC_API_USERNAME:?Run ./install.sh first}
+      GO2RTC_API_PASSWORD: ${GO2RTC_API_PASSWORD:?Run ./install.sh first}
+      RTSP_USERNAME: ${RTSP_USERNAME:?Run ./install.sh first}
+      RTSP_PASSWORD: ${RTSP_PASSWORD:?Run ./install.sh first}
+    volumes:
+      - ./go2rtc:/config:ro
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    ports:
+      - "${RTSP_BIND_IP:-0.0.0.0}:${RTSP_PORT:-8554}:8554/tcp"
+    networks:
+      - rtkey-net
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      ACCESS_TOKEN_FILE: /run/secrets/rtkey_access_token
+      STATE_FILE: /data/state.json
+      GO2RTC_URL: http://go2rtc:1984
+      GO2RTC_API_USERNAME: ${GO2RTC_API_USERNAME:?Run ./install.sh first}
+      GO2RTC_API_PASSWORD: ${GO2RTC_API_PASSWORD:?Run ./install.sh first}
+      SERVER_IP: ${SERVER_IP:?Run ./install.sh first}
+      RTSP_PORT: ${RTSP_PORT:-8554}
+      RTSP_USERNAME: ${RTSP_USERNAME:?Run ./install.sh first}
+      RTSP_PASSWORD: ${RTSP_PASSWORD:?Run ./install.sh first}
+      AUDIO_MODE: ${AUDIO_MODE:-copy}
+      AUDIO_OVERRIDES_JSON: ${AUDIO_OVERRIDES_JSON:-{}}
+      ALLOWED_STREAM_HOST_SUFFIXES: ${ALLOWED_STREAM_HOST_SUFFIXES:-camera.rt.ru}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-20}
+      RTSP_PROBE_TIMEOUT_SECONDS: ${RTSP_PROBE_TIMEOUT_SECONDS:-12}
+      RTSP_PROBE_WORKERS: ${RTSP_PROBE_WORKERS:-8}
+      REFRESH_MARGIN_SECONDS: ${REFRESH_MARGIN_SECONDS:-900}
+      FALLBACK_REFRESH_SECONDS: ${FALLBACK_REFRESH_SECONDS:-14400}
+      RETRY_MIN_SECONDS: ${RETRY_MIN_SECONDS:-30}
+      RETRY_MAX_SECONDS: ${RETRY_MAX_SECONDS:-300}
+      RUNTIME_CHECK_SECONDS: ${RUNTIME_CHECK_SECONDS:-60}
+      HEALTH_MAX_STALE_SECONDS: ${HEALTH_MAX_STALE_SECONDS:-21600}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    secrets:
+      - source: rtkey_access_token
+        target: rtkey_access_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    volumes:
+      - gateway-state:/data
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    depends_on:
+      - go2rtc
+    networks:
+      - rtkey-net
+    healthcheck:
+      test: ["CMD", "python", "-m", "rtkey_gateway", "healthcheck"]
+      interval: 60s
+      timeout: 60s
+      retries: 3
+      start_period: 90s
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  rtkey-net:
+    driver: bridge
+
+volumes:
+  gateway-state:
+
+secrets:
+  rtkey_access_token:
+    environment: RTKEY_ACCESS_TOKEN

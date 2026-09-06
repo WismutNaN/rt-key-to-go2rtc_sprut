@@ -1,0 +1,18 @@
+api:
+  listen: ":1984"
+  username: "${GO2RTC_API_USERNAME}"
+  password: "${GO2RTC_API_PASSWORD}"
+  local_auth: true
+  allow_paths:
+    - /api/streams
+
+rtsp:
+  listen: ":8554"
+  username: "${RTSP_USERNAME}"
+  password: "${RTSP_PASSWORD}"
+  default_query: "video&audio"
+
+webrtc:
+  listen: ""
+
+streams: {}

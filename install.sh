@@ -1,263 +1,212 @@
 #!/usr/bin/env bash
-#
-# install.sh — установка go2rtc + автообновление токенов камер «Ростелеком Ключ».
-#
-# Что делает:
-#   1. спрашивает access-token (и показывает, где его взять в браузере);
-#   2. определяет архитектуру и скачивает нужный go2rtc (amd64/arm64/arm/i386);
-#   3. ставит зависимости через apt (python3, python3-requests, ffmpeg, curl);
-#   4. ставит systemd-службу go2rtc;
-#   5. ставит cron, который каждые 6 часов обновляет токены камер и
-#      перезапускает службу (per-camera токены живут всего несколько часов).
-#
-# Авторизация — ТОЛЬКО по access-token. Вход по телефону/паролю не используем:
-# он может требовать капчу.
-#
-# Токен НЕ хранится в репозитории — он сохраняется локально в
-# <INSTALL_DIR>/access_token (chmod 600).
-#
-# Интерактивно:        sudo ./install.sh
-# Авто (без вопросов):  sudo ./install.sh --token eyJ... [--install-dir /opt/go2rtc] [--arch arm64] -y
-# Через переменные:     ACCESS_TOKEN=eyJ... INSTALL_DIR=/opt/go2rtc sudo -E ./install.sh
-#
-set -euo pipefail
+# Быстрый и повторяемый запуск RT Key -> go2rtc через Docker Compose.
+set -Eeuo pipefail
 
-GO2RTC_RELEASE_BASE="https://github.com/AlexxIT/go2rtc/releases/latest/download"
-CRON_SCHEDULE="0 */6 * * *"
-API_PORT=1984
-RTSP_PORT=8554
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+chmod +x manage.sh uninstall.sh 2>/dev/null || true
 
-# значения по умолчанию (можно переопределить ENV или аргументами)
-INSTALL_DIR="${INSTALL_DIR:-/opt/go2rtc}"
-ACCESS_TOKEN="${ACCESS_TOKEN:-}"
-ARCH_OVERRIDE="${GO2RTC_ARCH:-}"
-ASSUME_YES=0
+read_env() {
+    local key="$1"
+    [[ -f .env ]] || return 0
+    sed -n "s/^${key}=//p" .env | tail -n 1
+}
+
+ACCESS_TOKEN="${ACCESS_TOKEN:-$(read_env RTKEY_ACCESS_TOKEN)}"
+SERVER_IP="${SERVER_IP:-$(read_env SERVER_IP)}"
+RTSP_PORT="${RTSP_PORT:-$(read_env RTSP_PORT)}"
+RTSP_PORT="${RTSP_PORT:-8554}"
+AUDIO_MODE="${AUDIO_MODE:-$(read_env AUDIO_MODE)}"
+AUDIO_MODE="${AUDIO_MODE:-copy}"
 
 usage() {
-    cat <<USAGE
-Использование: sudo ./install.sh [опции]
+    cat <<'USAGE'
+Использование: ./install.sh [опции]
 
 Опции:
-  --token <TOKEN>        access-token (иначе будет запрошен интерактивно)
-  --install-dir <DIR>    каталог установки (по умолчанию: /opt/go2rtc)
-  --arch <amd64|arm64|arm|i386>
-                         принудительно задать архитектуру go2rtc
-                         (по умолчанию определяется автоматически)
-  -y, --yes              не задавать вопросов (для авто-установки)
-  -h, --help             показать эту справку
+  --token <TOKEN>       Bearer Token Ростелеком Ключ
+  --server-ip <IP>      IP сервера, который увидит SprutHub
+  --rtsp-port <PORT>    внешний RTSP-порт (по умолчанию 8554)
+  --audio <MODE>        copy|aac|pcma|pcmu|none (по умолчанию copy)
+  -h, --help            показать справку
 
-Переменные окружения: ACCESS_TOKEN, INSTALL_DIR, GO2RTC_ARCH (с sudo -E).
+Также поддерживаются переменные ACCESS_TOKEN, SERVER_IP, RTSP_PORT, AUDIO_MODE.
+Docker Engine и команда "docker compose" должны быть установлены заранее.
 USAGE
 }
 
-# --- разбор аргументов (до sudo, чтобы --help работал без root) ---
-parse_args() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --token)        ACCESS_TOKEN="${2:-}"; shift 2;;
-            --token=*)      ACCESS_TOKEN="${1#*=}"; shift;;
-            --install-dir|--dir)   INSTALL_DIR="${2:-}"; shift 2;;
-            --install-dir=*|--dir=*) INSTALL_DIR="${1#*=}"; shift;;
-            --arch)         ARCH_OVERRIDE="${2:-}"; shift 2;;
-            --arch=*)       ARCH_OVERRIDE="${1#*=}"; shift;;
-            -y|--yes)       ASSUME_YES=1; shift;;
-            -h|--help)      usage; exit 0;;
-            *) echo "Неизвестный аргумент: $1" >&2; usage; exit 1;;
-        esac
-    done
+require_value() {
+    if (( $# < 2 )) || [[ -z "$2" ]]; then
+        echo "Для $1 требуется непустое значение." >&2
+        exit 2
+    fi
 }
-parse_args "$@"
 
-SELF="$(realpath "${BASH_SOURCE[0]}")"
-REPO_DIR="$(dirname "$SELF")"
-
-# --- проверка на запуск от root (systemd, cron, $INSTALL_DIR, /var/log) ---
-if [[ $EUID -ne 0 ]]; then
-    echo "Требуются права root. Перезапускаю через sudo..."
-    exec sudo -E bash "$SELF" "$@"
-fi
-[[ $EUID -eq 0 ]] || { echo "Этот скрипт должен запускаться от root." >&2; exit 1; }
-
-# --- определение архитектуры go2rtc ---
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64|amd64)          echo "amd64";;
-        aarch64|arm64)         echo "arm64";;
-        armv7l|armv6l|armhf|arm) echo "arm";;
-        i386|i486|i586|i686)   echo "i386";;
-        *) return 1;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --token) require_value "$@"; ACCESS_TOKEN="$2"; shift 2 ;;
+        --token=*) ACCESS_TOKEN="${1#*=}"; shift ;;
+        --server-ip) require_value "$@"; SERVER_IP="$2"; shift 2 ;;
+        --server-ip=*) SERVER_IP="${1#*=}"; shift ;;
+        --rtsp-port) require_value "$@"; RTSP_PORT="$2"; shift 2 ;;
+        --rtsp-port=*) RTSP_PORT="${1#*=}"; shift ;;
+        --audio) require_value "$@"; AUDIO_MODE="$2"; shift 2 ;;
+        --audio=*) AUDIO_MODE="${1#*=}"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Неизвестный аргумент: $1" >&2; usage; exit 2 ;;
     esac
+done
+
+command -v docker >/dev/null 2>&1 || {
+    echo "Docker не найден. Сначала установите Docker Engine." >&2
+    exit 1
 }
-if [[ -n "$ARCH_OVERRIDE" ]]; then
-    ARCH="$ARCH_OVERRIDE"
-else
-    ARCH="$(detect_arch)" || {
-        echo "Не удалось определить архитектуру ($(uname -m)). Задай вручную: --arch amd64|arm64|arm|i386" >&2
+docker compose version >/dev/null 2>&1 || {
+    echo "Не найдена команда 'docker compose'. Установите Compose plugin." >&2
+    exit 1
+}
+
+case "$AUDIO_MODE" in
+    copy|aac|pcma|pcmu|none) ;;
+    *) echo "Неверный audio mode: $AUDIO_MODE" >&2; exit 2 ;;
+esac
+[[ "$RTSP_PORT" =~ ^[0-9]+$ ]] && (( RTSP_PORT >= 1 && RTSP_PORT <= 65535 )) || {
+    echo "RTSP-порт должен быть числом от 1 до 65535." >&2
+    exit 2
+}
+
+normalize_token() {
+    ACCESS_TOKEN="$(printf '%s' "$ACCESS_TOKEN" | tr -d '\r\n')"
+    if [[ "${ACCESS_TOKEN,,}" == bearer\ * ]]; then
+        ACCESS_TOKEN="${ACCESS_TOKEN:7}"
+    fi
+    [[ "$ACCESS_TOKEN" =~ ^[A-Za-z0-9._~-]+$ ]]
+}
+
+if [[ -z "$ACCESS_TOKEN" ]]; then
+    [[ -t 0 ]] || {
+        echo "Передайте токен через --token или ACCESS_TOKEN." >&2
         exit 1
     }
+    echo "Получите Bearer Token в браузере:"
+    echo "  https://key.rt.ru/main/pwa/dashboard"
+    echo "  F12 -> Network -> запрос barrier -> Authorization: Bearer ..."
+    read -rsp "Вставьте Bearer Token: " ACCESS_TOKEN
+    echo
 fi
-GO2RTC_BIN="go2rtc_linux_${ARCH}"
-GO2RTC_URL="$GO2RTC_RELEASE_BASE/$GO2RTC_BIN"
-
-echo "============================================================"
-echo " Установка go2rtc + автообновление токенов (Ростелеком Ключ)"
-echo "   архитектура: $(uname -m) → $GO2RTC_BIN"
-echo "   каталог:     $INSTALL_DIR"
-echo "============================================================"
-echo
-echo "Где взять access-token (используем ТОЛЬКО токен — вход по телефону"
-echo "может требовать капчу, поэтому он не используется):"
-echo
-echo "  1. Открой в браузере  https://key.rt.ru/main/pwa/dashboard  и войди."
-echo "  2. Нажми F12 → вкладка Network (Сеть)."
-echo "  3. Найди запрос  barrier  и в его заголовках возьми строку:"
-echo "         Authorization: Bearer <ТОКЕН>"
-echo "  4. Скопируй сам <ТОКЕН> — длинная строка вида  eyJ..."
-echo "     (подробнее: archive/README.md)"
-echo
-
-# --- получаем токен (из аргумента/ENV или интерактивно) ---
-normalize_token() {
-    ACCESS_TOKEN="$(printf '%s' "$ACCESS_TOKEN" | tr -d '[:space:]')"
-    ACCESS_TOKEN="${ACCESS_TOKEN#Bearer}"
+normalize_token || {
+    echo "Bearer Token пуст или содержит символы, недопустимые для JWT/.env." >&2
+    exit 2
 }
-if [[ -z "$ACCESS_TOKEN" ]]; then
-    if [[ ! -t 0 ]]; then
-        echo "Нет терминала для ввода. Передай токен:  --token eyJ...  или  ACCESS_TOKEN=eyJ... sudo -E ./install.sh" >&2
-        exit 1
-    fi
-    while [[ -z "$ACCESS_TOKEN" ]]; do
-        read -rsp "Вставь access-token и нажми Enter: " ACCESS_TOKEN
-        echo
-        normalize_token
-        if [[ "$ACCESS_TOKEN" != *.*.* ]]; then
-            echo "  Не похоже на токен (ожидается eyJ... с точками). Ещё раз."
-            ACCESS_TOKEN=""
-        fi
-    done
-else
-    normalize_token
-fi
 
-# --- зависимости через apt + проверка ---
-echo "==> Устанавливаю зависимости (python3, python3-requests, ffmpeg, curl)..."
-if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        python3 python3-requests ffmpeg curl >/dev/null || true
-else
-    echo "  apt-get не найден — поставь вручную: python3, python3-requests, ffmpeg, curl."
+random_secret() {
+    od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
+}
+
+if [[ -z "$SERVER_IP" ]] && command -v ip >/dev/null 2>&1; then
+    SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')"
 fi
-missing=()
-command -v python3 >/dev/null 2>&1 || missing+=("python3")
-command -v ffmpeg  >/dev/null 2>&1 || missing+=("ffmpeg")
-command -v curl    >/dev/null 2>&1 || missing+=("curl")
-python3 -c 'import requests' 2>/dev/null || missing+=("python3-requests")
-if (( ${#missing[@]} )); then
-    echo "  Отсутствуют зависимости: ${missing[*]}. Установи их и запусти снова." >&2
+if [[ -z "$SERVER_IP" ]]; then
+    SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+[[ -n "$SERVER_IP" ]] || {
+    echo "Не удалось определить IP сервера. Укажите --server-ip." >&2
     exit 1
+}
+[[ "$SERVER_IP" =~ ^[A-Za-z0-9._:-]+$ ]] || {
+    echo "SERVER_IP содержит недопустимые символы." >&2
+    exit 2
+}
+
+RTSP_USERNAME="$(read_env RTSP_USERNAME)"
+RTSP_USERNAME="${RTSP_USERNAME:-spruthub}"
+RTSP_PASSWORD="$(read_env RTSP_PASSWORD)"
+RTSP_PASSWORD="${RTSP_PASSWORD:-$(random_secret)}"
+GO2RTC_API_USERNAME="$(read_env GO2RTC_API_USERNAME)"
+GO2RTC_API_USERNAME="${GO2RTC_API_USERNAME:-controller}"
+GO2RTC_API_PASSWORD="$(read_env GO2RTC_API_PASSWORD)"
+GO2RTC_API_PASSWORD="${GO2RTC_API_PASSWORD:-$(random_secret)}"
+RTSP_BIND_IP="$(read_env RTSP_BIND_IP)"
+RTSP_BIND_IP="${RTSP_BIND_IP:-0.0.0.0}"
+AUDIO_OVERRIDES_JSON="$(read_env AUDIO_OVERRIDES_JSON)"
+if [[ -z "$AUDIO_OVERRIDES_JSON" ]]; then
+    AUDIO_OVERRIDES_JSON='{}'
 fi
+ALLOWED_STREAM_HOST_SUFFIXES="$(read_env ALLOWED_STREAM_HOST_SUFFIXES)"
+ALLOWED_STREAM_HOST_SUFFIXES="${ALLOWED_STREAM_HOST_SUFFIXES:-camera.rt.ru}"
+HTTP_TIMEOUT_SECONDS="$(read_env HTTP_TIMEOUT_SECONDS)"
+HTTP_TIMEOUT_SECONDS="${HTTP_TIMEOUT_SECONDS:-20}"
+RTSP_PROBE_TIMEOUT_SECONDS="$(read_env RTSP_PROBE_TIMEOUT_SECONDS)"
+RTSP_PROBE_TIMEOUT_SECONDS="${RTSP_PROBE_TIMEOUT_SECONDS:-12}"
+RTSP_PROBE_WORKERS="$(read_env RTSP_PROBE_WORKERS)"
+RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-8}"
+REFRESH_MARGIN_SECONDS="$(read_env REFRESH_MARGIN_SECONDS)"
+REFRESH_MARGIN_SECONDS="${REFRESH_MARGIN_SECONDS:-900}"
+FALLBACK_REFRESH_SECONDS="$(read_env FALLBACK_REFRESH_SECONDS)"
+FALLBACK_REFRESH_SECONDS="${FALLBACK_REFRESH_SECONDS:-14400}"
+RETRY_MIN_SECONDS="$(read_env RETRY_MIN_SECONDS)"
+RETRY_MIN_SECONDS="${RETRY_MIN_SECONDS:-30}"
+RETRY_MAX_SECONDS="$(read_env RETRY_MAX_SECONDS)"
+RETRY_MAX_SECONDS="${RETRY_MAX_SECONDS:-300}"
+RUNTIME_CHECK_SECONDS="$(read_env RUNTIME_CHECK_SECONDS)"
+RUNTIME_CHECK_SECONDS="${RUNTIME_CHECK_SECONDS:-60}"
+HEALTH_MAX_STALE_SECONDS="$(read_env HEALTH_MAX_STALE_SECONDS)"
+HEALTH_MAX_STALE_SECONDS="${HEALTH_MAX_STALE_SECONDS:-21600}"
+LOG_LEVEL="$(read_env LOG_LEVEL)"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+TIMEZONE="$(read_env TZ)"
+TIMEZONE="${TZ:-${TIMEZONE:-Asia/Yekaterinburg}}"
 
-# --- проверяем токен (заодно показываем число камер) ---
-echo "==> Проверяю токен (запрашиваю список камер)..."
-CAM_COUNT="$(python3 - "$ACCESS_TOKEN" <<'PY'
-import sys, json, urllib.request
-tok = sys.argv[1]
-req = urllib.request.Request(
-    "https://vc.key.rt.ru/api/v1/cameras?limit=100&offset=0",
-    headers={"authorization": f"Bearer {tok}", "accept": "application/json"})
-try:
-    data = json.load(urllib.request.urlopen(req, timeout=20))
-    print(len((data.get("data") or {}).get("items") or []))
-except Exception as e:
-    print("ERR:" + str(e))
-PY
-)"
-if [[ "$CAM_COUNT" == ERR:* || -z "$CAM_COUNT" ]]; then
-    echo "  Токен не принят: ${CAM_COUNT#ERR:}" >&2
-    echo "  Проверь токен и запусти снова." >&2
-    exit 1
-fi
-echo "  OK — камер найдено: $CAM_COUNT"
-
-# --- раскладываем файлы ---
-echo "==> Устанавливаю в $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR"
-install -m 644 "$REPO_DIR/rt_key_to_go2rtc.py" "$INSTALL_DIR/rt_key_to_go2rtc.py"
-install -m 644 "$REPO_DIR/go2rtc/base.yaml"    "$INSTALL_DIR/base.yaml"
-install -m 755 "$REPO_DIR/go2rtc/renew_cfg.sh" "$INSTALL_DIR/renew_cfg.sh"
-
-# токен — локально, с правами 600
-( umask 077; printf '%s' "$ACCESS_TOKEN" > "$INSTALL_DIR/access_token" )
-chmod 600 "$INSTALL_DIR/access_token"
-
-# --- скачиваем go2rtc под нужную архитектуру ---
-echo "==> Скачиваю go2rtc ($GO2RTC_BIN)..."
-curl -fSL "$GO2RTC_URL" -o "$INSTALL_DIR/go2rtc"
-chmod +x "$INSTALL_DIR/go2rtc"
-
-# --- systemd-служба (пути подставляются здесь, в репозитории их нет) ---
-echo "==> Ставлю systemd-службу go2rtc..."
-cat > /etc/systemd/system/go2rtc.service <<EOF
-[Unit]
-Description=go2rtc (RTSP / WebRTC / HTTP gateway)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-Group=root
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/go2rtc -config $INSTALL_DIR/go2rtc.yaml
-Restart=always
-RestartSec=2
-StandardOutput=journal
-StandardError=journal
-LimitNOFILE=65536
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
+umask 077
+ENV_TMP=".env.$$"
+trap 'rm -f -- "$ENV_TMP"' EXIT
+cat > "$ENV_TMP" <<EOF
+TZ=$TIMEZONE
+RTKEY_ACCESS_TOKEN=$ACCESS_TOKEN
+SERVER_IP=$SERVER_IP
+RTSP_BIND_IP=$RTSP_BIND_IP
+RTSP_PORT=$RTSP_PORT
+RTSP_USERNAME=$RTSP_USERNAME
+RTSP_PASSWORD=$RTSP_PASSWORD
+GO2RTC_API_USERNAME=$GO2RTC_API_USERNAME
+GO2RTC_API_PASSWORD=$GO2RTC_API_PASSWORD
+AUDIO_MODE=$AUDIO_MODE
+AUDIO_OVERRIDES_JSON=$AUDIO_OVERRIDES_JSON
+ALLOWED_STREAM_HOST_SUFFIXES=$ALLOWED_STREAM_HOST_SUFFIXES
+HTTP_TIMEOUT_SECONDS=$HTTP_TIMEOUT_SECONDS
+RTSP_PROBE_TIMEOUT_SECONDS=$RTSP_PROBE_TIMEOUT_SECONDS
+RTSP_PROBE_WORKERS=$RTSP_PROBE_WORKERS
+REFRESH_MARGIN_SECONDS=$REFRESH_MARGIN_SECONDS
+FALLBACK_REFRESH_SECONDS=$FALLBACK_REFRESH_SECONDS
+RETRY_MIN_SECONDS=$RETRY_MIN_SECONDS
+RETRY_MAX_SECONDS=$RETRY_MAX_SECONDS
+RUNTIME_CHECK_SECONDS=$RUNTIME_CHECK_SECONDS
+HEALTH_MAX_STALE_SECONDS=$HEALTH_MAX_STALE_SECONDS
+LOG_LEVEL=$LOG_LEVEL
 EOF
+chmod 600 "$ENV_TMP"
+mv -f -- "$ENV_TMP" .env
+trap - EXIT
 
-systemctl daemon-reload
-systemctl enable go2rtc >/dev/null 2>&1 || true
+echo "Проверяю конфигурацию Docker Compose..."
+docker compose config --quiet
 
-# --- первый запуск: renew генерирует go2rtc.yaml и (пере)запускает службу ---
-echo "==> Генерирую конфиг и запускаю go2rtc..."
-"$INSTALL_DIR/renew_cfg.sh"
+echo "Собираю controller и запускаю сервисы..."
+docker compose up -d --build go2rtc
+docker compose up -d --build --force-recreate --no-deps controller
 
-# --- cron (root), каждые 6 часов ---
-echo "==> Ставлю cron (каждые 6 часов)..."
-CRON_CMD="$INSTALL_DIR/renew_cfg.sh >> /var/log/go2rtc-renew.log 2>&1"
-# crontab -l завершается с ошибкой, если crontab ещё нет — нейтрализуем через || true,
-# иначе set -e/pipefail обрывает скрипт и cron не добавляется.
-EXISTING_CRON="$(crontab -l 2>/dev/null || true)"
-if grep -Fq "$CRON_CMD" <<<"$EXISTING_CRON"; then
-    echo "  cron уже стоит."
-else
-    {
-        [[ -n "$EXISTING_CRON" ]] && printf '%s\n' "$EXISTING_CRON"
-        echo "$CRON_SCHEDULE $CRON_CMD"
-    } | crontab -
-    echo "  cron добавлен: $CRON_SCHEDULE $CRON_CMD"
-fi
+echo "Ожидаю первый проверенный список камер..."
+OUTPUT=""
+for ((_attempt = 1; _attempt <= 90; _attempt++)); do
+    if OUTPUT="$(docker compose exec -T controller python -m rtkey_gateway show 2>/dev/null)"; then
+        printf '\n%s\n' "$OUTPUT"
+        echo "Управление: ./manage.sh status | show | logs | set-token"
+        exit 0
+    fi
+    sleep 2
+done
 
-HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-echo
-echo "============================================================"
-echo " Готово!"
-echo
-echo "   Открой go2rtc в браузере:"
-echo "        http://localhost:$API_PORT"
-if [[ -n "$HOST_IP" ]]; then
-echo "        http://$HOST_IP:$API_PORT     (с другого устройства в сети)"
-fi
-echo
-echo "   RTSP-потоки:  rtsp://localhost:$RTSP_PORT/rt1, .../rt2, ..."
-echo "   Служба:       systemctl status go2rtc   |   journalctl -u go2rtc -f"
-echo "   Каталог:      $INSTALL_DIR"
-echo "   Токены обновляются автоматически каждые 6 ч (cron → renew_cfg.sh)."
-echo "   Удаление:     sudo ./uninstall.sh"
-echo "============================================================"
+echo "Контейнеры запущены, но камеры не прошли проверку за 180 секунд." >&2
+echo "Проверьте: ./manage.sh status && ./manage.sh logs" >&2
+docker compose ps
+exit 1

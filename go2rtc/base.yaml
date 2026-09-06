@@ -1,4 +1,0 @@
-rtsp:
-  listen: ":8554"
-
-streams:

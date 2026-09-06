@@ -2,7 +2,10 @@
 access_token
 cameras.json
 streams.yaml
-go2rtc.yaml
+/go2rtc.yaml
+.env
+secrets/
+data/
 
 # downloaded go2rtc binaries (note: trailing names only, not the go2rtc/ dir)
 go2rtc_linux_*
@@ -15,3 +18,5 @@ archive/archive-info
 # python
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
