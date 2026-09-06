@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from rtkey_gateway.application.health import evaluate_state
+from rtkey_gateway.application.snapshot import GetCameraSnapshot
 from rtkey_gateway.application.sync_video import SynchronizeVideoFeeds
 from rtkey_gateway.config import Settings
 from rtkey_gateway.errors import GatewayError
@@ -27,6 +28,7 @@ from rtkey_gateway.infrastructure.rtkey import (
 )
 from rtkey_gateway.infrastructure.rtsp_probe import Go2RtcRtspProbe
 from rtkey_gateway.infrastructure.secrets import FileAccessTokenSource
+from rtkey_gateway.interfaces.snapshot_http import SnapshotHttpService
 
 
 @dataclass(slots=True)
@@ -36,6 +38,7 @@ class Container:
     media_gateway: Go2RtcMediaGateway
     media_probe: Go2RtcRtspProbe
     synchronizer: SynchronizeVideoFeeds
+    snapshot_server: SnapshotHttpService
 
 
 def build_container(settings: Settings) -> Container:
@@ -74,7 +77,7 @@ def build_container(settings: Settings) -> Container:
         media_gateway=media_gateway,
         repository=repository,
         clock=SystemClock(),
-        audio_policy=settings.audio_policy,
+        media_policy=settings.media_policy,
         media_probe=media_probe,
         refresh_margin=settings.refresh_margin,
         fallback_interval=settings.fallback_interval,
@@ -82,7 +85,22 @@ def build_container(settings: Settings) -> Container:
         retry_max=settings.retry_max,
         runtime_check_interval=settings.runtime_check_interval,
     )
-    return Container(settings, repository, media_gateway, media_probe, synchronizer)
+    snapshot_server = SnapshotHttpService(
+        "0.0.0.0",
+        settings.snapshot_listen_port,
+        settings.rtsp_username,
+        settings.rtsp_password,
+        GetCameraSnapshot(repository, media_gateway),
+        workers=settings.snapshot_workers,
+    )
+    return Container(
+        settings,
+        repository,
+        media_gateway,
+        media_probe,
+        synchronizer,
+        snapshot_server,
+    )
 
 
 def _configure_logging(level: str) -> None:
@@ -123,9 +141,15 @@ def command_show(container: Container) -> int:
     print()
     for binding in sorted(cameras, key=lambda item: item.stream_name.value):
         print(f"{binding.title} [{binding.camera_id.value}]:")
+        print("RTSP:")
         print(
             f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"
             f"{binding.stream_name.value}"
+        )
+        print("Snapshot:")
+        print(
+            f"http://{user}:{password}@{host}:{settings.snapshot_port}/snapshot/"
+            f"{binding.stream_name.value}.jpg"
         )
         print()
     print("==========================================")
@@ -137,7 +161,7 @@ def command_status(container: Container) -> int:
     return 0
 
 
-def command_healthcheck(container: Container) -> int:
+def _command_healthcheck(container: Container, *, deep: bool) -> int:
     state = container.repository.load()
     streams = container.media_gateway.list_streams()
     expected = {
@@ -145,14 +169,14 @@ def command_healthcheck(container: Container) -> int:
         for binding in state.bindings.values()
         if binding.present
     }
-    rtsp = container.media_probe.probe(expected)
+    rtsp = container.media_probe.probe(expected if deep else set())
     report = evaluate_state(
         state,
         now=int(time.time()),
         runtime_streams=streams,
         max_stale=container.settings.health_max_stale,
         rtsp_reachable=rtsp.server_reachable,
-        rtsp_streams=rtsp.available_streams,
+        rtsp_streams=rtsp.available_streams if deep else None,
     )
     label = "healthy"
     if not report.healthy:
@@ -163,6 +187,14 @@ def command_healthcheck(container: Container) -> int:
     for message in report.messages:
         print(f"- {message}")
     return 0 if report.healthy else 1
+
+
+def command_healthcheck(container: Container) -> int:
+    return _command_healthcheck(container, deep=False)
+
+
+def command_deep_healthcheck(container: Container) -> int:
+    return _command_healthcheck(container, deep=True)
 
 
 def command_sync_once(container: Container) -> int:
@@ -183,7 +215,11 @@ def command_run(container: Container) -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    container.synchronizer.run(stop_event)
+    container.snapshot_server.start()
+    try:
+        container.synchronizer.run(stop_event)
+    finally:
+        container.snapshot_server.stop()
     return 0
 
 
@@ -191,7 +227,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RT Key video gateway controller")
     parser.add_argument(
         "command",
-        choices=("run", "sync-once", "show", "status", "healthcheck"),
+        choices=(
+            "run",
+            "sync-once",
+            "show",
+            "status",
+            "healthcheck",
+            "deep-healthcheck",
+        ),
         nargs="?",
         default="run",
     )
@@ -210,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
             "show": command_show,
             "status": command_status,
             "healthcheck": command_healthcheck,
+            "deep-healthcheck": command_deep_healthcheck,
         }[command](container)
     except GatewayError as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)

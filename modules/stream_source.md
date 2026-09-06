@@ -21,7 +21,7 @@
 ## Инварианты
 
 - Полученный upstream URL не изменяется и не разбирается повторно.
-- Видео всегда `copy`; меняется только режим аудио.
+- Видео использует стабильный H.264 template или `copy`; аудио выбирается независимо.
 - Полный source не попадает в обычный лог.
 
 ## Намеренно НЕ обрабатывает
@@ -31,4 +31,9 @@
 
 ## Заметки для агента
 
-> По умолчанию формируется `#video=copy#audio=copy`. Решение о режиме принимает отдельная audio policy. Для AAC/PCMA/PCMU go2rtc запускает FFmpeg-транскодирование только аудио. Допустимость hostname проверяет Rostelecom adapter до создания `SecretUrl`.
+> По умолчанию формируется
+> `#input=rtkey_http#video=rtkey_h264_stable#audio=pcma`. FFmpeg template
+> нормализует timestamps в CFR и используется go2rtc лениво — только при наличии
+> consumer. Для стабильной камеры `video=copy` выключает video decode/encode даже
+> во время просмотра. Допустимость hostname проверяет Rostelecom adapter до
+> создания `SecretUrl`.

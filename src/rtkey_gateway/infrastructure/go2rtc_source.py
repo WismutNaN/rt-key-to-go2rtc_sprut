@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from rtkey_gateway.domain import AudioMode, MediaProfile, SecretUrl
+from rtkey_gateway.domain import AudioMode, MediaProfile, SecretUrl, VideoMode
 
 
 def build_go2rtc_source(upstream_url: SecretUrl, profile: MediaProfile) -> str:
-    source = f"ffmpeg:{upstream_url.value}#video={profile.video_mode}"
+    video = (
+        "copy" if profile.video_mode is VideoMode.COPY else "rtkey_h264_stable"
+    )
+    source = f"ffmpeg:{upstream_url.value}#input=rtkey_http#video={video}"
     if profile.audio_mode is not AudioMode.NONE:
         source += f"#audio={profile.audio_mode.value}"
     return source

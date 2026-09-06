@@ -19,8 +19,12 @@ ACCESS_TOKEN="${ACCESS_TOKEN:-$(read_env RTKEY_ACCESS_TOKEN)}"
 SERVER_IP="${SERVER_IP:-$(read_env SERVER_IP)}"
 RTSP_PORT="${RTSP_PORT:-$(read_env RTSP_PORT)}"
 RTSP_PORT="${RTSP_PORT:-8554}"
+SNAPSHOT_PORT="${SNAPSHOT_PORT:-$(read_env SNAPSHOT_PORT)}"
+SNAPSHOT_PORT="${SNAPSHOT_PORT:-8080}"
 AUDIO_MODE="${AUDIO_MODE:-$(read_env AUDIO_MODE)}"
-AUDIO_MODE="${AUDIO_MODE:-copy}"
+AUDIO_MODE="${AUDIO_MODE:-pcma}"
+VIDEO_MODE="${VIDEO_MODE:-$(read_env VIDEO_MODE)}"
+VIDEO_MODE="${VIDEO_MODE:-h264}"
 
 usage() {
     cat <<'USAGE'
@@ -30,10 +34,13 @@ usage() {
   --token <TOKEN>       Bearer Token Ростелеком Ключ
   --server-ip <IP>      IP сервера, который увидит SprutHub
   --rtsp-port <PORT>    внешний RTSP-порт (по умолчанию 8554)
-  --audio <MODE>        copy|aac|pcma|pcmu|none (по умолчанию copy)
+  --snapshot-port <PORT> внешний HTTP snapshot-порт (по умолчанию 8080)
+  --audio <MODE>        copy|aac|pcma|pcmu|none (по умолчанию pcma)
+  --video <MODE>        h264|copy (по умолчанию стабильный h264)
   -h, --help            показать справку
 
-Также поддерживаются переменные ACCESS_TOKEN, SERVER_IP, RTSP_PORT, AUDIO_MODE.
+Также поддерживаются ACCESS_TOKEN, SERVER_IP, RTSP_PORT, SNAPSHOT_PORT,
+AUDIO_MODE и VIDEO_MODE.
 Docker Engine и команда "docker compose" должны быть установлены заранее.
 USAGE
 }
@@ -53,8 +60,12 @@ while [[ $# -gt 0 ]]; do
         --server-ip=*) SERVER_IP="${1#*=}"; shift ;;
         --rtsp-port) require_value "$@"; RTSP_PORT="$2"; shift 2 ;;
         --rtsp-port=*) RTSP_PORT="${1#*=}"; shift ;;
+        --snapshot-port) require_value "$@"; SNAPSHOT_PORT="$2"; shift 2 ;;
+        --snapshot-port=*) SNAPSHOT_PORT="${1#*=}"; shift ;;
         --audio) require_value "$@"; AUDIO_MODE="$2"; shift 2 ;;
         --audio=*) AUDIO_MODE="${1#*=}"; shift ;;
+        --video) require_value "$@"; VIDEO_MODE="$2"; shift 2 ;;
+        --video=*) VIDEO_MODE="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Неизвестный аргумент: $1" >&2; usage; exit 2 ;;
     esac
@@ -73,8 +84,17 @@ case "$AUDIO_MODE" in
     copy|aac|pcma|pcmu|none) ;;
     *) echo "Неверный audio mode: $AUDIO_MODE" >&2; exit 2 ;;
 esac
+case "$VIDEO_MODE" in
+    h264|copy) ;;
+    *) echo "Неверный video mode: $VIDEO_MODE" >&2; exit 2 ;;
+esac
 [[ "$RTSP_PORT" =~ ^[0-9]+$ ]] && (( RTSP_PORT >= 1 && RTSP_PORT <= 65535 )) || {
     echo "RTSP-порт должен быть числом от 1 до 65535." >&2
+    exit 2
+}
+[[ "$SNAPSHOT_PORT" =~ ^[0-9]+$ ]] \
+    && (( SNAPSHOT_PORT >= 1 && SNAPSHOT_PORT <= 65535 )) || {
+    echo "Snapshot-порт должен быть числом от 1 до 65535." >&2
     exit 2
 }
 
@@ -123,9 +143,32 @@ GO2RTC_API_PASSWORD="$(read_env GO2RTC_API_PASSWORD)"
 GO2RTC_API_PASSWORD="${GO2RTC_API_PASSWORD:-$(random_secret)}"
 RTSP_BIND_IP="$(read_env RTSP_BIND_IP)"
 RTSP_BIND_IP="${RTSP_BIND_IP:-0.0.0.0}"
+SNAPSHOT_BIND_IP="$(read_env SNAPSHOT_BIND_IP)"
+SNAPSHOT_BIND_IP="${SNAPSHOT_BIND_IP:-$RTSP_BIND_IP}"
+if [[ "$SNAPSHOT_BIND_IP" == "$RTSP_BIND_IP" && "$SNAPSHOT_PORT" == "$RTSP_PORT" ]]; then
+    echo "RTSP и snapshot не могут использовать один host-порт на одном IP." >&2
+    exit 2
+fi
+SNAPSHOT_WORKERS="$(read_env SNAPSHOT_WORKERS)"
+SNAPSHOT_WORKERS="${SNAPSHOT_WORKERS:-2}"
+[[ "$SNAPSHOT_WORKERS" =~ ^[0-9]+$ ]] \
+    && (( SNAPSHOT_WORKERS >= 1 && SNAPSHOT_WORKERS <= 16 )) || {
+    echo "SNAPSHOT_WORKERS должен быть числом от 1 до 16." >&2
+    exit 2
+}
 AUDIO_OVERRIDES_JSON="$(read_env AUDIO_OVERRIDES_JSON)"
 if [[ -z "$AUDIO_OVERRIDES_JSON" ]]; then
     AUDIO_OVERRIDES_JSON='{}'
+fi
+VIDEO_FPS="$(read_env VIDEO_FPS)"
+VIDEO_FPS="${VIDEO_FPS:-30}"
+[[ "$VIDEO_FPS" =~ ^[0-9]+$ ]] && (( VIDEO_FPS >= 1 && VIDEO_FPS <= 60 )) || {
+    echo "VIDEO_FPS должен быть числом от 1 до 60." >&2
+    exit 2
+}
+VIDEO_OVERRIDES_JSON="$(read_env VIDEO_OVERRIDES_JSON)"
+if [[ -z "$VIDEO_OVERRIDES_JSON" ]]; then
+    VIDEO_OVERRIDES_JSON='{}'
 fi
 ALLOWED_STREAM_HOST_SUFFIXES="$(read_env ALLOWED_STREAM_HOST_SUFFIXES)"
 ALLOWED_STREAM_HOST_SUFFIXES="${ALLOWED_STREAM_HOST_SUFFIXES:-camera.rt.ru}"
@@ -134,7 +177,12 @@ HTTP_TIMEOUT_SECONDS="${HTTP_TIMEOUT_SECONDS:-20}"
 RTSP_PROBE_TIMEOUT_SECONDS="$(read_env RTSP_PROBE_TIMEOUT_SECONDS)"
 RTSP_PROBE_TIMEOUT_SECONDS="${RTSP_PROBE_TIMEOUT_SECONDS:-12}"
 RTSP_PROBE_WORKERS="$(read_env RTSP_PROBE_WORKERS)"
-RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-8}"
+RTSP_PROBE_WORKERS="${RTSP_PROBE_WORKERS:-1}"
+[[ "$RTSP_PROBE_WORKERS" =~ ^[0-9]+$ ]] \
+    && (( RTSP_PROBE_WORKERS >= 1 && RTSP_PROBE_WORKERS <= 32 )) || {
+    echo "RTSP_PROBE_WORKERS должен быть числом от 1 до 32." >&2
+    exit 2
+}
 REFRESH_MARGIN_SECONDS="$(read_env REFRESH_MARGIN_SECONDS)"
 REFRESH_MARGIN_SECONDS="${REFRESH_MARGIN_SECONDS:-900}"
 FALLBACK_REFRESH_SECONDS="$(read_env FALLBACK_REFRESH_SECONDS)"
@@ -161,10 +209,16 @@ TZ=$TIMEZONE
 SERVER_IP=$SERVER_IP
 RTSP_BIND_IP=$RTSP_BIND_IP
 RTSP_PORT=$RTSP_PORT
+SNAPSHOT_BIND_IP=$SNAPSHOT_BIND_IP
+SNAPSHOT_PORT=$SNAPSHOT_PORT
+SNAPSHOT_WORKERS=$SNAPSHOT_WORKERS
 RTSP_USERNAME=$RTSP_USERNAME
 RTSP_PASSWORD=$RTSP_PASSWORD
 GO2RTC_API_USERNAME=$GO2RTC_API_USERNAME
 GO2RTC_API_PASSWORD=$GO2RTC_API_PASSWORD
+VIDEO_MODE=$VIDEO_MODE
+VIDEO_FPS=$VIDEO_FPS
+VIDEO_OVERRIDES_JSON=$VIDEO_OVERRIDES_JSON
 AUDIO_MODE=$AUDIO_MODE
 AUDIO_OVERRIDES_JSON=$AUDIO_OVERRIDES_JSON
 ALLOWED_STREAM_HOST_SUFFIXES=$ALLOWED_STREAM_HOST_SUFFIXES

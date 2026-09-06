@@ -25,8 +25,10 @@
 - Используется `alexxit/go2rtc:1.9.14`, не `latest`.
 - Controller собирается из `python:3.12.14-alpine3.24`, а не плавающего minor-тега.
 - Порт `1984` отсутствует в `ports`.
-- Публикуется только `${RTSP_PORT:-8554}:8554/tcp`.
-- Privileged, host network и GPU не требуются для режима copy.
+- Публикуются `${RTSP_PORT:-8554}:8554/tcp` и узкий Basic-auth snapshot
+  `${SNAPSHOT_PORT:-8080}:8080/tcp`; API `1984` не публикуется.
+- Privileged, host network и GPU не требуются. H.264 нормализуется программно
+  только при наличии consumer.
 - RTSP-сервер go2rtc выдаёт RTP interleaved по TCP; WebRTC отключён, поэтому bridge-сети и одного TCP mapping достаточно.
 - Controller запускается не от root и получает state directory на запись.
 - Bearer передаётся controller только как file-backed Compose secret; source

@@ -12,7 +12,7 @@
               ▼                                               ▼
 ┌──────────────────────────┐                     ┌───────────────────────────┐
 │ медиасервер камеры       │◄────────────────────│ go2rtc 1.9.14             │
-│ host из streamerUrl      │       FFmpeg copy   │ API только Docker-сеть    │
+│ host из streamerUrl      │    ленивый FFmpeg   │ API только Docker-сеть    │
 └──────────────────────────┘                     └─────────────┬─────────────┘
                                                               │ RTSP :8554
                                                               │ spruthub/password
@@ -23,23 +23,27 @@
                                                 └───────────────────────────┘
 ```
 
-На целевом Linux-сервере работают два контейнера. Наружу публикуется только TCP-порт RTSP `8554`. Порт API `1984` доступен контейнеру `controller` по внутреннему имени `go2rtc`, но не публикуется на интерфейсах сервера.
+На целевом Linux-сервере работают два контейнера. Наружу публикуются RTSP
+`8554/tcp` и узкий HTTP snapshot endpoint `8080/tcp`, оба с credentials
+SprutHub. Порт API `1984` доступен контейнеру `controller` по внутреннему имени
+`go2rtc`, но не публикуется на интерфейсах сервера.
 
 ## Компоненты
 
 | Компонент | Ответственность | Публичный интерфейс |
 |---|---|---|
 | Docker Compose | Запускает два сервиса, сеть, volumes и healthcheck | `docker compose up -d` |
-| `controller` | Получает камеры, планирует refresh, обновляет go2rtc | CLI `run`, `sync-once`, `show`, `status`, `healthcheck` |
-| Клиент Ростелекома | Новый API, pagination, fallback и нормализация | `fetch_feeds()` |
+| `controller` | Получает камеры, планирует refresh, обновляет go2rtc и отдаёт JPEG | CLI `run`, `sync-once`, `show`, `status`, `healthcheck`, HTTP snapshot |
+| Клиент Ростелекома | Новый API, legacy completion/fallback, pagination и нормализация | `fetch_feeds()` |
 | Реестр камер | Стабильное соответствие UID → title-based name | `StreamNamingPolicy.reconcile()` |
 | Построитель source | Безопасно формирует URL и применяет media profile | `build_go2rtc_source()` |
-| Политика аудио | Выбирает copy/transcode глобально или для камеры | `profile_for()` |
-| Клиент go2rtc | Создаёт и заменяет runtime-stream через PATCH | `upsert_stream()` |
+| Media policy | Независимо выбирает video/audio профиль глобально или по UID | `profile_for()` |
+| Клиент go2rtc | Создаёт runtime-stream, меняет source и получает JPEG | `upsert_stream()`, `fetch_jpeg()` |
 | Планировщик refresh | Использует минимальный JWT `exp`, margin и retry | `SynchronizeVideoFeeds.refresh_once()` |
 | Хранилище состояния | Атомарно сохраняет mapping и last-known-good | `load()`, `save()` |
-| RTSP probe | Коротко проверяет каждый lazy upstream через DESCRIBE | `probe()` |
-| Установщик | Получает секреты и печатает RTSP-ссылки | `./install.sh`, `./manage.sh show` |
+| RTSP probe | Проверяет сервер через OPTIONS или явно будит upstream через DESCRIBE | `probe()` |
+| Snapshot interface | Отдаёт только JPEG проверенных камер с Basic Auth | `GET /snapshot/<name>.jpg` |
+| Установщик | Получает секреты и печатает RTSP/snapshot-ссылки | `./install.sh`, `./manage.sh show` |
 
 ## DDD-границы и правило зависимостей
 
@@ -99,17 +103,29 @@ Shared kernel намеренно минимален и реализован в `
 4. `controller` ждёт готовности API go2rtc.
 5. Если существует last-known-good с ещё действующими streamer-токенами, контроллер восстанавливает эти runtime-streams.
 6. Контроллер вызывает новый endpoint `camera_video_data/list`, проходя страницы до конца.
-7. При транспортной ошибке, неподдерживаемом статусе или неверной структуре нового API контроллер один раз пробует старый endpoint `api/v1/cameras`.
-8. Ответ любого API преобразуется в единый доменный `CameraFeed`.
+7. Затем он вызывает legacy endpoint `api/v1/cameras`: успешный legacy-ответ
+   дополняет отсутствующие UID, а при ошибке нового API полностью становится fallback.
+8. Ответы преобразуются в единый доменный `CameraFeed`; при одинаковом UID
+   приоритет сохраняется за новым API.
 9. Реестр сохраняет прежнее имя для известного UID. Для новой камеры он транслитерирует и нормализует `title`; при пустом или конфликтующем title добавляет короткую часть UID.
 10. Из `streamerUrl` извлекается origin медиасервера; фиксированный `live-vdk4` не используется.
-11. Для каждой валидной камеры строится `ffmpeg:` source с копированием видео и выбранным режимом аудио.
+11. Для каждой валидной камеры строится ленивый `ffmpeg:` source. По умолчанию
+    он нормализует H.264 в CFR 30 fps и AAC в PCMA; `copy` можно включить
+    глобально или для отдельного UID.
 12. Контроллер выполняет `PATCH /api/streams?name=<name>&src=<source>`. В go2rtc 1.9.14 PATCH создаёт отсутствующий runtime-stream и меняет существующий без перезапуска процесса.
-13. Controller выполняет короткий авторизованный RTSP `DESCRIBE`, который заставляет lazy stream подключиться к upstream.
+13. Если source и media profile не изменились и runtime-stream существует,
+    PATCH и probe пропускаются. Иначе controller выполняет авторизованный RTSP
+    `DESCRIBE`; initial/changed upstream проверяются последовательно, чтобы не
+    запускать несколько H.264 encoder одновременно.
 14. Только после успешного probe URL, срок и media profile становятся last-known-good. При ошибке прежние upstream и profile немедленно возвращаются через PATCH.
 15. Следующее обновление назначается за 15 минут до самого раннего корректного `exp`. Если `exp` отсутствует, применяется консервативный интервал четыре часа.
 16. SprutHub постоянно использует одну RTSP-ссылку; смена upstream-токена для него прозрачна.
-17. Между обновлениями токенов controller раз в минуту сверяет runtime-имена; после отдельного restart go2rtc пропавшие потоки восстанавливаются из ещё действующего LKG без вызова Ростелеком API.
+17. При запросе snapshot controller проверяет binding и через внутренний
+    `/api/frame.jpeg` получает один JPEG. Этот запрос является временным consumer.
+18. Автоматический healthcheck делает только RTSP `OPTIONS` и не запускает
+    media. Полный `DESCRIBE` всех камер выполняется только явной командой
+    `./manage.sh check-streams`.
+19. Между обновлениями токенов controller раз в минуту сверяет runtime-имена; после отдельного restart go2rtc пропавшие потоки восстанавливаются из ещё действующего LKG без вызова Ростелеком API.
 
 ## Ключевые интерфейсы
 
@@ -134,7 +150,8 @@ class CameraBinding:
 
 @dataclass(frozen=True)
 class MediaProfile:
-    video_mode: Literal["copy"]
+    video_mode: Literal["h264", "copy"]
+    video_fps: int
     audio_mode: Literal["copy", "aac", "pcma", "pcmu", "none"]
 
 class VideoCatalogPort(Protocol):
@@ -149,6 +166,9 @@ class MediaGatewayPort(Protocol):
     def upsert_stream(self, name: StreamName, upstream: SecretUrl,
                       profile: MediaProfile) -> None: ...
     def list_streams(self) -> set[str]: ...
+
+class SnapshotGatewayPort(Protocol):
+    def fetch_jpeg(self, name: StreamName) -> bytes: ...
 
 class MediaProbePort(Protocol):
     def probe(self, stream_names: set[str]) -> MediaProbeResult: ...
@@ -176,7 +196,8 @@ GET https://vc.key.rt.ru/api/v1/cameras?limit=100&offset=0
 ```text
 ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
   ?mp4-fragment-length=0.5&mp4-use-speed=0&mp4-afiller=1&token=<urlencoded-token>
-  #video=copy#audio=<copy|aac|pcma|pcmu>
+  #input=rtkey_http#video=<rtkey_h264_stable|copy>
+  #audio=<copy|aac|pcma|pcmu>
 ```
 
 ## Инварианты
@@ -186,8 +207,10 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 - Изменение порядка камер в API не меняет RTSP-ссылки.
 - Controller/status не выводят `streamer_token`, Bearer Token и пароли; media-логи go2rtc/FFmpeg считаются чувствительными.
 - Last-known-good не заменяется данными, которые не прошли нормализацию, PATCH и RTSP/upstream probe.
+- Неизменившийся source не заменяется повторным PATCH и не запускает media probe.
 - API go2rtc не публикуется на host-порт.
-- RTSP всегда требует username и password для подключений из LAN.
+- RTSP и snapshot всегда требуют username и password для подключений из LAN.
+- Автоматический healthcheck не является media consumer.
 - Ошибка одной камеры не отменяет успешное обновление остальных камер.
 
 ## Технологические решения
@@ -198,8 +221,9 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | Контроллер | `python:3.12.14-alpine3.24`, синхронный цикл | Воспроизводимый multi-arch base; runtime без сторонних Python-пакетов |
 | HTTP | Python `urllib` с TLS verification, timeout и запретом redirects | Нет runtime-зависимостей; Bearer не уйдёт на другой host через redirect |
 | go2rtc | `alexxit/go2rtc:1.9.14` | Фиксированная multi-arch версия с FFmpeg внутри |
-| Видео | `video=copy` | Нет перекодирования и лишней нагрузки CPU |
-| Аудио | Отдельная политика, `audio=copy` по умолчанию | Позволяет глобальные и будущие per-camera профили без изменения URL/API-модулей |
+| Видео | Ленивый H.264 CFR 30 fps; per-UID `copy` | Устраняет нестабильные DTS/зелёный экран, но не расходует CPU без consumer |
+| Аудио | Отдельная политика, `audio=pcma` по умолчанию | Повышает совместимость SprutHub; AAC/copy/PCMU остаются настраиваемыми |
+| Snapshot | Basic-auth proxy к внутреннему `/api/frame.jpeg` | SprutHub получает JPEG, а общий API go2rtc остаётся закрыт |
 | Runtime update | `PATCH /api/streams` | Не требует restart и умеет создать отсутствующий stream |
 | Состояние | Версионированный JSON в volume | Небольшой объём, прозрачно и достаточно надёжно |
 | API security | Внутренняя Docker-сеть + Basic Auth | Контроллер доступен, LAN-доступ отсутствует |
@@ -210,7 +234,8 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 
 | Сбой | Влияние | Митигация |
 |---|---|---|
-| Новый API недоступен | Нельзя получить свежие данные | Немедленный fallback на старый API |
+| Новый API недоступен | Нельзя получить свежие данные | Legacy API становится fallback |
+| Новый API вернул неполный список | Часть камер могла исчезнуть | Успешный legacy-ответ дополняет отсутствующие UID |
 | Оба API недоступны | Токены не обновляются | Сохранить runtime и last-known-good; retry с backoff |
 | Bearer Token истёк | Новые streamer-токены недоступны | Явный unhealthy и команда замены токена; секрет не логировать |
 | JWT не содержит `exp` | Нельзя вычислить точный refresh | Обновлять раз в четыре часа |
@@ -218,16 +243,19 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | PATCH/probe одной камеры не прошёл | Новая конфигурация этой камеры отклоняется | Вернуть её прежние upstream и media profile, не менять LKG, повторить отдельно |
 | go2rtc перезапущен | Runtime-streams исчезли | Controller повторно применяет LKG и свежие sources |
 | Повреждён state JSON | Потеря стабильного mapping | Не перезаписывать файл; использовать резервную копию и аварийный статус |
-| Аудиокодек не принят SprutHub | Видео есть, звука нет | `AUDIO_MODE=aac`, затем `pcma` или `pcmu`; видео остаётся copy |
+| Неровные DTS H.264 | Зелёный экран или зависание клиента | Ленивый H.264 CFR; для стабильного источника разрешён `copy` |
+| Аудиокодек не принят SprutHub | Видео есть, звука нет | PCMA по умолчанию, затем PCMU/AAC/copy; учитывать beta-ограничения SprutHub |
+| Snapshot временно недоступен | Нет превью, RTSP не затронут | HTTP 502/503, ограничение параллелизма и повтор клиента |
 | Камера исчезла из API | Старый endpoint остаётся, но upstream истечёт | Пометить отсутствующей; не переиспользовать её имя автоматически |
 | Порт 8554 занят | RTSP не запускается | Явная ошибка Compose; поддержать настраиваемый host-порт |
 
 ## Проверка без Docker
 
 - Unit-тесты всех чистых преобразований и расчёта времени.
-- HTTP contract-тесты с поддельным transport для обоих форматов API, pagination, fallback и ошибок.
+- HTTP contract-тесты с поддельным transport для обоих форматов API, pagination, merge/fallback и ошибок.
 - Тесты клиента go2rtc с локальным mock HTTP server, включая Basic Auth и URL encoding.
-- Локальный mock RTSP server для авторизованного `DESCRIBE`, без получения реального видео.
+- Локальный mock RTSP server для авторизованных `OPTIONS`/`DESCRIBE`, без получения реального видео.
+- Локальный Basic-auth snapshot server и проверка JPEG proxy без обращения к камере.
 - Тесты атомарной записи state во временный каталог.
 - Проверка YAML и результата подстановки переменных Compose парсером, если он доступен без запуска daemon.
 - Проверка shell-скриптов через `bash -n` и ShellCheck, если утилита установлена.

@@ -10,12 +10,12 @@ from rtkey_gateway.application.sync_video import SynchronizeVideoFeeds
 from rtkey_gateway.application.ports import MediaProbeResult
 from rtkey_gateway.domain import (
     AudioMode,
-    AudioPolicy,
     CameraBinding,
     CameraFeed,
     CameraId,
     GatewayState,
     MediaProfile,
+    MediaPolicy,
     SecretUrl,
     StreamName,
 )
@@ -129,7 +129,7 @@ class SynchronizerTests(unittest.TestCase):
         repository = MemoryRepository()
         gateway = Gateway()
         use_case = SynchronizeVideoFeeds(
-            Catalog(feeds), gateway, repository, FakeClock(now), AudioPolicy(),
+            Catalog(feeds), gateway, repository, FakeClock(now), MediaPolicy(),
             refresh_margin=900, fallback_interval=14_400, retry_min=30,
         )
         result = use_case.refresh_once()
@@ -145,7 +145,7 @@ class SynchronizerTests(unittest.TestCase):
             gateway,
             repository,
             FakeClock(1_000),
-            AudioPolicy(),
+            MediaPolicy(),
         )
         result = use_case.refresh_once()
         self.assertEqual((result.updated, result.failed), (1, 1))
@@ -158,7 +158,7 @@ class SynchronizerTests(unittest.TestCase):
             Gateway(),
             MemoryRepository(),
             FakeClock(1_000),
-            AudioPolicy(),
+            MediaPolicy(),
             refresh_margin=900,
             fallback_interval=14_400,
         )
@@ -181,7 +181,7 @@ class SynchronizerTests(unittest.TestCase):
         )
         gateway = Gateway()
         use_case = SynchronizeVideoFeeds(
-            Catalog([]), gateway, MemoryRepository(state), FakeClock(1_000), AudioPolicy()
+            Catalog([]), gateway, MemoryRepository(state), FakeClock(1_000), MediaPolicy()
         )
         self.assertEqual(use_case.restore_last_good(), 0)
         self.assertEqual(gateway.names, set())
@@ -212,7 +212,7 @@ class SynchronizerTests(unittest.TestCase):
         gateway = Gateway()
         gateway.names.add("existing_camera")
         use_case = SynchronizeVideoFeeds(
-            Catalog([]), gateway, MemoryRepository(state), FakeClock(1_000), AudioPolicy()
+            Catalog([]), gateway, MemoryRepository(state), FakeClock(1_000), MediaPolicy()
         )
         self.assertEqual(use_case.restore_missing_runtime(), 1)
         self.assertEqual([update[0] for update in gateway.updates], ["missing_camera"])
@@ -238,7 +238,7 @@ class SynchronizerTests(unittest.TestCase):
             gateway,
             repository,
             FakeClock(1_000),
-            AudioPolicy(AudioMode.AAC),
+            MediaPolicy(AudioMode.AAC),
             media_probe=Probe(set()),
         )
         result = use_case.refresh_once()
@@ -256,10 +256,30 @@ class SynchronizerTests(unittest.TestCase):
             gateway,
             MemoryRepository(),
             FakeClock(1_000),
-            AudioPolicy(),
+            MediaPolicy(),
         ).refresh_once()
         self.assertEqual((result.updated, result.failed), (0, 1))
         self.assertEqual(gateway.updates, [])
+
+    def test_same_token_and_profile_do_not_replace_lazy_runtime(self) -> None:
+        feed = make_feed("uid", "Camera", 5_000)
+        repository = MemoryRepository()
+        gateway = Gateway()
+        use_case = SynchronizeVideoFeeds(
+            Catalog([feed]),
+            gateway,
+            repository,
+            FakeClock(1_000),
+            MediaPolicy(),
+            media_probe=Probe({"camera"}),
+        )
+
+        first = use_case.refresh_once()
+        second = use_case.refresh_once()
+
+        self.assertEqual((first.updated, second.updated), (1, 0))
+        self.assertEqual(len(gateway.updates), 1)
+        self.assertIsNone(repository.state.bindings["uid"].last_error)
 
 
 if __name__ == "__main__":

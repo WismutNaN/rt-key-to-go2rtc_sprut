@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
-from rtkey_gateway.errors import AuthenticationError, SchemaError, ValidationError
+from rtkey_gateway.errors import (
+    AuthenticationError,
+    SchemaError,
+    TransportError,
+    ValidationError,
+)
 from rtkey_gateway.infrastructure.rtkey.video_catalog import (
     FallbackVideoCatalog,
     LegacyCameraApiStrategy,
@@ -151,6 +156,65 @@ class RtKeyAdapterTests(unittest.TestCase):
         )
         feeds = NewCameraApiStrategy(transport, TokenSource()).fetch_feeds()
         self.assertEqual([feed.camera_id.value for feed in feeds], ["valid"])
+
+    def test_successful_apis_are_merged_with_new_api_precedence(self) -> None:
+        new_token = jwt_with_exp(2_000_000_000)
+        legacy_token = jwt_with_exp(2_000_000_100)
+        transport = QueueTransport(
+            [
+                json_response(
+                    {
+                        "data": [
+                            {
+                                "uid": "shared",
+                                "title": "New title",
+                                "streamerToken": new_token,
+                                "streamerUrl": "https://new.camera.rt.ru",
+                            }
+                        ]
+                    }
+                ),
+                json_response(
+                    {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": "shared",
+                                    "title": "Old title",
+                                    "streamer_token": legacy_token,
+                                    "streamer_url": "https://old.camera.rt.ru",
+                                },
+                                {
+                                    "id": "legacy-only",
+                                    "title": "Legacy only",
+                                    "streamer_token": legacy_token,
+                                    "streamer_url": "https://old.camera.rt.ru",
+                                },
+                            ]
+                        }
+                    }
+                ),
+            ]
+        )
+        options = {"transport": transport, "token_source": TokenSource()}
+        feeds = FallbackVideoCatalog(
+            [NewCameraApiStrategy(**options), LegacyCameraApiStrategy(**options)]
+        ).fetch_feeds()
+        by_uid = {feed.camera_id.value: feed for feed in feeds}
+        self.assertEqual(set(by_uid), {"shared", "legacy-only"})
+        self.assertEqual(by_uid["shared"].title, "New title")
+        self.assertIn("new.camera.rt.ru", by_uid["shared"].upstream_url.value)
+
+    def test_empty_catalog_is_not_confirmed_when_other_api_failed(self) -> None:
+        transport = QueueTransport(
+            [json_response({"data": []}), json_response({}, 500)]
+        )
+        options = {"transport": transport, "token_source": TokenSource()}
+        catalog = FallbackVideoCatalog(
+            [NewCameraApiStrategy(**options), LegacyCameraApiStrategy(**options)]
+        )
+        with self.assertRaises(TransportError):
+            catalog.fetch_feeds()
 
 
 if __name__ == "__main__":

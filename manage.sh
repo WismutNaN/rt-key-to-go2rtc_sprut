@@ -11,8 +11,9 @@ usage() {
 Использование: ./manage.sh <команда>
 
 Команды:
-  show         показать логин, пароль и RTSP-ссылки всех камер
+  show         показать логин, пароль, RTSP и snapshot-ссылки всех камер
   status       показать контейнеры и безопасный статус controller
+  check-streams глубоко проверить все upstream (временно запускает обработку)
   logs         безопасные логи controller без upstream URL
   logs-media   диагностические логи go2rtc/FFmpeg (могут содержать source)
   refresh      пересоздать только controller и обновить камеры/настройки
@@ -25,7 +26,7 @@ USAGE
 COMMAND="${1:-}"
 case "$COMMAND" in
     -h|--help|help|"") usage; exit 0 ;;
-    show|status|logs|logs-media|refresh|set-token|up|down) ;;
+    show|status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
     *)
         echo "Неизвестная команда: $COMMAND" >&2
         usage
@@ -45,6 +46,10 @@ case "$COMMAND" in
     status)
         docker compose ps
         docker compose exec -T controller python -m rtkey_gateway status
+        ;;
+    check-streams)
+        exec docker compose exec -T controller \
+            python -m rtkey_gateway deep-healthcheck
         ;;
     logs)
         exec docker compose logs -f --tail=200 controller

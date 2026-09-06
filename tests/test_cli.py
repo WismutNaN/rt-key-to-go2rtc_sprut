@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import contextlib
 import io
+import time
 import unittest
 from types import SimpleNamespace
 
-from rtkey_gateway.domain import CameraBinding, CameraId, GatewayState, StreamName
-from rtkey_gateway.interfaces.cli import command_show
+from rtkey_gateway.application.ports import MediaProbeResult
+from rtkey_gateway.domain import (
+    CameraBinding,
+    CameraId,
+    GatewayState,
+    SecretUrl,
+    StreamName,
+)
+from rtkey_gateway.interfaces.cli import command_healthcheck, command_show
 from tests.helpers import MemoryRepository
 
 
@@ -25,6 +33,76 @@ class CliTests(unittest.TestCase):
             result = command_show(container)
         self.assertEqual(result, 2)
         self.assertIn("не прошли первичную проверку", error.getvalue())
+
+    def test_show_prints_rtsp_and_snapshot_urls(self) -> None:
+        state = GatewayState(
+            bindings={
+                "uid": CameraBinding(
+                    CameraId("uid"),
+                    StreamName("podezd"),
+                    "Подъезд",
+                    last_good_upstream=SecretUrl(
+                        "https://live.camera.rt.ru/uid?token=secret"
+                    ),
+                )
+            }
+        )
+        settings = SimpleNamespace(
+            rtsp_username="spruthub",
+            rtsp_password="rtsp-password",
+            rtsp_host="192.168.50.99",
+            rtsp_port=8554,
+            snapshot_port=8080,
+        )
+        container = SimpleNamespace(
+            repository=MemoryRepository(state), settings=settings
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = command_show(container)
+        self.assertEqual(result, 0)
+        rendered = output.getvalue()
+        self.assertIn("rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd", rendered)
+        self.assertIn(
+            "http://spruthub:rtsp-password@192.168.50.99:8080/snapshot/podezd.jpg",
+            rendered,
+        )
+
+    def test_automatic_healthcheck_does_not_probe_camera_streams(self) -> None:
+        now = int(time.time())
+        state = GatewayState(
+            bindings={
+                "uid": CameraBinding(
+                    CameraId("uid"),
+                    StreamName("camera"),
+                    "Camera",
+                    last_good_upstream=SecretUrl(
+                        "https://live.camera.rt.ru/uid?token=secret"
+                    ),
+                    last_good_expires_at=now + 3_600,
+                )
+            },
+            last_fetch_at=now,
+        )
+
+        class Probe:
+            requested: set[str] | None = None
+
+            def probe(self, streams: set[str]) -> MediaProbeResult:
+                self.requested = streams
+                return MediaProbeResult(True, frozenset())
+
+        probe = Probe()
+        container = SimpleNamespace(
+            repository=MemoryRepository(state),
+            media_gateway=SimpleNamespace(list_streams=lambda: {"camera"}),
+            media_probe=probe,
+            settings=SimpleNamespace(health_max_stale=21_600),
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = command_healthcheck(container)
+        self.assertEqual(result, 0)
+        self.assertEqual(probe.requested, set())
 
 
 if __name__ == "__main__":

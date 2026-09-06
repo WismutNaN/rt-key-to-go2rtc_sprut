@@ -15,6 +15,7 @@ from rtkey_gateway.domain import (
     MediaProfile,
     SecretUrl,
     StreamName,
+    VideoMode,
 )
 from rtkey_gateway.errors import StateError, ValidationError
 
@@ -65,7 +66,8 @@ class JsonVideoStateRepository:
             ),
             "last_good_profile": (
                 {
-                    "video_mode": binding.last_good_profile.video_mode,
+                    "video_mode": binding.last_good_profile.video_mode.value,
+                    "video_fps": binding.last_good_profile.video_fps,
                     "audio_mode": binding.last_good_profile.audio_mode.value,
                 }
                 if binding.last_good_profile is not None
@@ -88,8 +90,9 @@ class JsonVideoStateRepository:
             raise ValidationError("State media profile is not an object")
         profile = (
             MediaProfile(
-                video_mode=str(raw_profile.get("video_mode", "copy")),
                 audio_mode=AudioMode.parse(str(raw_profile.get("audio_mode", "copy"))),
+                video_mode=VideoMode.parse(str(raw_profile.get("video_mode", "copy"))),
+                video_fps=int(raw_profile.get("video_fps", 30)),
             )
             if raw_profile is not None
             else None

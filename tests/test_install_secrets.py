@@ -73,7 +73,11 @@ class InstallSecretTests(unittest.TestCase):
         env_file = self.workspace / ".env"
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(env_file.stat().st_mode), 0o600)
-        self.assertNotIn("RTKEY_ACCESS_TOKEN", env_file.read_text(encoding="utf-8"))
+        env_text = env_file.read_text(encoding="utf-8")
+        self.assertNotIn("RTKEY_ACCESS_TOKEN", env_text)
+        self.assertIn("VIDEO_MODE=h264", env_text)
+        self.assertIn("AUDIO_MODE=pcma", env_text)
+        self.assertIn("SNAPSHOT_PORT=8080", env_text)
 
     def test_install_writes_file_secret_outside_env(self) -> None:
         self.run_install("Bearer header.payload.signature")

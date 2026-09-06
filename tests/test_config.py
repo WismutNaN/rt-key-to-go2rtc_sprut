@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from rtkey_gateway.config import Settings
+from rtkey_gateway.domain import AudioMode, VideoMode
 from rtkey_gateway.errors import ValidationError
 
 
@@ -49,6 +50,24 @@ class SettingsTests(unittest.TestCase):
     def test_ipv6_server_host_is_normalized_for_url_formatter(self) -> None:
         settings = Settings.from_env(environment(SERVER_IP="[2001:db8::10]"))
         self.assertEqual(settings.rtsp_host, "2001:db8::10")
+
+    def test_default_media_profile_targets_spruthub_compatibility(self) -> None:
+        profile = Settings.from_env(environment()).media_policy.profile_for("uid")
+        self.assertEqual(profile.audio_mode, AudioMode.PCMA)
+        self.assertEqual(profile.video_mode, VideoMode.H264)
+        self.assertEqual(profile.video_fps, 30)
+
+    def test_video_override_is_parsed_by_camera_uid(self) -> None:
+        settings = Settings.from_env(
+            environment(
+                VIDEO_MODE="h264",
+                VIDEO_FPS="25",
+                VIDEO_OVERRIDES_JSON='{"uid":"copy"}',
+            )
+        )
+        profile = settings.media_policy.profile_for("uid")
+        self.assertEqual(profile.video_mode, VideoMode.COPY)
+        self.assertEqual(profile.video_fps, 25)
 
 
 if __name__ == "__main__":

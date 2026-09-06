@@ -9,7 +9,7 @@
 |---|---|---|
 | `NewCameraApiStrategy` | adapter | Новый endpoint, pagination и camelCase parser |
 | `LegacyCameraApiStrategy` | adapter | Старый endpoint, pagination и snake_case parser |
-| `FallbackVideoCatalog` | adapter | Последовательно применяет стратегии |
+| `FallbackVideoCatalog` | adapter | Объединяет успешные стратегии с приоритетом новой |
 | `fetch_feeds()` | метод | Возвращает `list[CameraFeed]` либо типизированную ошибку |
 | `decode_jwt_exp()` | функция | Читает `exp` из payload без проверки подписи и без роли аутентификации |
 
@@ -24,7 +24,7 @@
 ## Инварианты
 
 - Новый API вызывается первым.
-- Fallback выполняется максимум один раз за цикл.
+- Legacy вызывается максимум один раз за цикл и дополняет UID, которых нет в новом API.
 - Pagination имеет верхнюю защитную границу и обнаруживает повтор страницы.
 - Пустой успешный список отличим от неверной схемы.
 - В доменную модель не попадает камера без UID, token или streamer URL.

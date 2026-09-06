@@ -8,8 +8,9 @@
 | Символ | Тип | Описание |
 |---|---|---|
 | `install.sh` | shell CLI | Интерактивная/неинтерактивная первичная установка Docker-варианта |
-| `manage.sh show` | shell CLI | Печатает логин, пароль и ссылки всех известных камер |
+| `manage.sh show` | shell CLI | Печатает логин, пароль, RTSP и snapshot URL всех камер |
 | `manage.sh status` | shell CLI | Показывает обезличенный статус без upstream secrets |
+| `manage.sh check-streams` | shell CLI | Явно запускает глубокую проверку upstream |
 | `manage.sh set-token` | shell CLI | Безопасно заменяет Bearer Token и инициирует refresh |
 
 ## Зависимости
@@ -32,7 +33,7 @@
 - Вывод `show` содержит RTSP password по явному запросу, но никогда не содержит Bearer или streamer token.
 - `logs` показывает только controller; потенциально чувствительные media-логи доступны отдельной командой с предупреждением.
 - `SERVER_IP` определяется автоматически и может быть явно переопределён.
-- Для каждой активной камеры выводятся title, UID и отдельный RTSP URL.
+- Для каждой активной камеры выводятся title, UID, RTSP URL и HTTP snapshot URL.
 
 ## Намеренно НЕ обрабатывает
 

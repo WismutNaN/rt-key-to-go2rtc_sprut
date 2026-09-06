@@ -22,6 +22,10 @@ class MediaGatewayPort(Protocol):
     def list_streams(self) -> set[str]: ...
 
 
+class SnapshotGatewayPort(Protocol):
+    def fetch_jpeg(self, name: StreamName) -> bytes: ...
+
+
 class VideoStateRepository(Protocol):
     def load(self) -> GatewayState: ...
 

@@ -13,10 +13,10 @@ from rtkey_gateway.application.ports import (
     VideoStateRepository,
 )
 from rtkey_gateway.domain import (
-    AudioPolicy,
     CameraBinding,
     CameraFeed,
     GatewayState,
+    MediaPolicy,
     MediaProfile,
     StreamNamingPolicy,
 )
@@ -39,7 +39,7 @@ class SynchronizeVideoFeeds:
         media_gateway: MediaGatewayPort,
         repository: VideoStateRepository,
         clock: Clock,
-        audio_policy: AudioPolicy,
+        media_policy: MediaPolicy,
         media_probe: MediaProbePort | None = None,
         naming_policy: StreamNamingPolicy | None = None,
         refresh_margin: int = 900,
@@ -53,7 +53,7 @@ class SynchronizeVideoFeeds:
         self.media_gateway = media_gateway
         self.repository = repository
         self.clock = clock
-        self.audio_policy = audio_policy
+        self.media_policy = media_policy
         self.media_probe = media_probe
         self.naming_policy = naming_policy or StreamNamingPolicy()
         self.refresh_margin = refresh_margin
@@ -77,7 +77,7 @@ class SynchronizeVideoFeeds:
                 and binding.last_good_expires_at <= now + 60
             ):
                 continue
-            profile = binding.last_good_profile or self.audio_policy.profile_for(
+            profile = binding.last_good_profile or self.media_policy.profile_for(
                 binding.camera_id.value
             )
             try:
@@ -109,7 +109,7 @@ class SynchronizeVideoFeeds:
                 and binding.last_good_expires_at <= now + 60
             ):
                 continue
-            profile = binding.last_good_profile or self.audio_policy.profile_for(
+            profile = binding.last_good_profile or self.media_policy.profile_for(
                 binding.camera_id.value
             )
             try:
@@ -177,6 +177,7 @@ class SynchronizeVideoFeeds:
 
         state = self.naming_policy.reconcile(state, feeds)
         bindings = dict(state.bindings)
+        runtime_streams = self.media_gateway.list_streams()
         updated = 0
         failed = 0
         expirations: list[int | None] = []
@@ -185,12 +186,32 @@ class SynchronizeVideoFeeds:
         for feed in feeds:
             uid = feed.camera_id.value
             binding = bindings[uid]
-            profile = self.audio_policy.profile_for(uid)
+            profile = self.media_policy.profile_for(uid)
             try:
                 if feed.expires_at is not None and feed.expires_at <= now + 60:
                     raise ValidationError(
                         "Camera API returned an expired streamer token"
                     )
+                if (
+                    binding.last_good_upstream == feed.upstream_url
+                    and binding.last_good_profile == profile
+                    and binding.stream_name.value in runtime_streams
+                ):
+                    # PATCH replaces the producer and can interrupt an active RTSP
+                    # consumer. A provider may return the same token near expiry,
+                    # so keep the existing lazy producer until something changed.
+                    expiry = (
+                        feed.expires_at
+                        if feed.expires_at is not None
+                        else binding.last_good_expires_at
+                    )
+                    bindings[uid] = replace(
+                        binding,
+                        last_good_expires_at=expiry,
+                        last_error=None,
+                    )
+                    expirations.append(expiry)
+                    continue
                 self.media_gateway.upsert_stream(
                     binding.stream_name, feed.upstream_url, profile
                 )
@@ -222,7 +243,7 @@ class SynchronizeVideoFeeds:
                 if old_is_usable:
                     old_profile = (
                         binding.last_good_profile
-                        or self.audio_policy.profile_for(binding.camera_id.value)
+                        or self.media_policy.profile_for(binding.camera_id.value)
                     )
                     try:
                         self.media_gateway.upsert_stream(

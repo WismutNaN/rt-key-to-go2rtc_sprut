@@ -4,13 +4,14 @@ import unittest
 
 from rtkey_gateway.domain import (
     AudioMode,
-    AudioPolicy,
     CameraFeed,
     CameraId,
     GatewayState,
+    MediaPolicy,
     SecretUrl,
     StreamName,
     StreamNamingPolicy,
+    VideoMode,
 )
 from rtkey_gateway.errors import ValidationError
 
@@ -68,12 +69,22 @@ class StreamNamingTests(unittest.TestCase):
         self.assertNotIn("\x1b", camera.title)
 
 
-class AudioPolicyTests(unittest.TestCase):
-    def test_override_does_not_change_video_copy(self) -> None:
-        policy = AudioPolicy(AudioMode.COPY, {"uid": AudioMode.PCMA})
+class MediaPolicyTests(unittest.TestCase):
+    def test_audio_and_video_overrides_are_independent(self) -> None:
+        policy = MediaPolicy(
+            default_audio=AudioMode.COPY,
+            audio_overrides={"uid": AudioMode.PCMA},
+            default_video=VideoMode.COPY,
+            video_overrides={"uid": VideoMode.H264},
+        )
         profile = policy.profile_for("uid")
-        self.assertEqual(profile.video_mode, "copy")
+        self.assertEqual(profile.video_mode, VideoMode.H264)
         self.assertEqual(profile.audio_mode, AudioMode.PCMA)
+
+    def test_compatibility_defaults_are_stable_h264(self) -> None:
+        profile = MediaPolicy().profile_for("uid")
+        self.assertEqual(profile.video_mode, VideoMode.H264)
+        self.assertEqual(profile.video_fps, 30)
 
     def test_invalid_mode_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):

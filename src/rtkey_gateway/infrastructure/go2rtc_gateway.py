@@ -33,12 +33,48 @@ class Go2RtcMediaGateway:
         self.timeout = timeout
 
     def _request(self, method: str, query: dict[str, str] | None = None):
-        url = f"{self.base_url}/api/streams"
+        return self._request_api("/api/streams", method, query)
+
+    def _request_api(
+        self,
+        path: str,
+        method: str,
+        query: dict[str, str] | None = None,
+        *,
+        accept: str | None = None,
+    ):
+        url = f"{self.base_url}{path}"
         if query:
             url = f"{url}?{urlencode(query)}"
+        headers = self.headers
+        if accept is not None:
+            headers = {**self.headers, "Accept": accept}
         return self.transport.request(
-            method, url, headers=self.headers, timeout=self.timeout
+            method, url, headers=headers, timeout=self.timeout
         )
+
+    def fetch_jpeg(self, name: StreamName) -> bytes:
+        response = self._request_api(
+            "/api/frame.jpeg",
+            "GET",
+            {"src": name.value, "cache": "10s"},
+            accept="image/jpeg",
+        )
+        if response.status in {401, 403}:
+            raise MediaGatewayError("go2rtc snapshot API authentication failed")
+        if not 200 <= response.status < 300:
+            raise MediaGatewayError(
+                f"go2rtc could not create snapshot for {name.value!r} "
+                f"(HTTP {response.status})"
+            )
+        if (
+            len(response.body) < 4
+            or len(response.body) > 10 * 1024 * 1024
+            or not response.body.startswith(b"\xff\xd8")
+            or not response.body.endswith(b"\xff\xd9")
+        ):
+            raise MediaGatewayError("go2rtc returned an invalid JPEG snapshot")
+        return response.body
 
     def list_streams(self) -> set[str]:
         response = self._request("GET")

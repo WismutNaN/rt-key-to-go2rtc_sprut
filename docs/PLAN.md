@@ -2,7 +2,24 @@
 
 ## Статус
 
-Основная реализация завершена. Старый systemd/cron-вариант заменён Docker Compose-развёртыванием из двух контейнеров. На машине разработки Docker намеренно не запускался; выполнены unit/contract/architecture-тесты и статические проверки. Осталась обязательная ручная приёмка на целевом Linux-сервере с действующим Bearer Token.
+Основная реализация завершена. Старый systemd/cron-вариант заменён Docker
+Compose-развёртыванием из двух контейнеров. После первой серверной проверки
+добавлены on-demand snapshot, стабильный H.264 CFR, PCMA по умолчанию и ленивый
+healthcheck. На машине разработки Docker намеренно не запускался; выполнены
+unit/contract/architecture-тесты и статические проверки. Осталась повторная
+приёмка на целевом Linux-сервере.
+
+## Карта атомарных модулей
+
+| Фаза | Самодостаточные спецификации |
+|---|---|
+| 1 | [Application ports](../modules/application_ports.md), [Shared kernel](../modules/shared_kernel.md), [Будущие контексты](../modules/future_contexts.md) |
+| 2 | [Docker runtime](../modules/docker_runtime.md) |
+| 3 | [Клиент Ростелекома](../modules/rostekey_api.md) |
+| 4 | [Реестр камер](../modules/camera_registry.md), [State store](../modules/state_store.md) |
+| 5 | [Контроллер refresh](../modules/refresh_controller.md), [Клиент go2rtc](../modules/go2rtc_client.md) |
+| 6 | [Media policy](../modules/audio_policy.md), [Построитель source](../modules/stream_source.md), [Диагностика](../modules/healthcheck.md), [Snapshot endpoint](../modules/snapshot_endpoint.md) |
+| 7 | [Быстрый старт](../modules/quick_start.md) |
 
 ## Фаза 1 — Архитектурный baseline
 
@@ -25,16 +42,19 @@
 ## Фаза 2 — Docker runtime и безопасность
 
 **Цель**: воспроизводимо запускать media gateway и controller с разными жизненными циклами.
-**Результат**: два контейнера, закреплённый go2rtc 1.9.14, отдельный volume состояния и единственный опубликованный RTSP-порт.
+**Результат**: два контейнера, закреплённый go2rtc 1.9.14, отдельный volume
+состояния и два узких опубликованных интерфейса: RTSP и JPEG snapshot.
 **Статус**: [x] Реализована, [ ] проверена на целевом сервере
 
 ### Выполнено
 
-- [x] API go2rtc не опубликован на host и ограничен `/api/streams`.
+- [x] API go2rtc не опубликован на host и ограничен `/api/streams` и
+  `/api/frame.jpeg` для внутреннего controller.
 - [x] Включены Basic Auth и `local_auth` для внутреннего API.
 - [x] RTSP требует отдельный логин/пароль.
 - [x] Controller работает не от root, filesystem read-only; capabilities удалены.
 - [x] Добавлены ограничения процессов, tmpfs, healthcheck и restart policy.
+- [x] Snapshot публикуется отдельным Basic-auth endpoint без доступа к Web UI/API.
 
 ### Проверка
 
@@ -50,7 +70,8 @@
 ## Фаза 3 — Anti-corruption layer Ростелекома
 
 **Цель**: переживать сосуществование и последующие изменения API камер.
-**Результат**: новый endpoint используется первым, legacy — fallback; оба преобразуются в один `CameraFeed`.
+**Результат**: новый endpoint имеет приоритет, legacy дополняет отсутствующие UID
+и служит fallback; оба преобразуются в один `CameraFeed`.
 **Статус**: [x] Завершена
 
 ### Выполнено
@@ -60,6 +81,7 @@
 - [x] Строгая валидация ответа перед заменой last-known-good.
 - [x] Host берётся из `streamerUrl`, проверяется allowlist suffix и не привязан к `live-vdk4`.
 - [x] Redirects запрещены, чтобы Bearer не ушёл на другой host.
+- [x] Успешные ответы обоих API объединяются по UID без дублирования камер.
 
 ### Тесты
 
@@ -102,6 +124,8 @@
 - [x] При неудачном probe прежние upstream и media profile возвращаются отдельным PATCH.
 - [x] После restart восстанавливаются только активные и ещё действующие bindings.
 - [x] После отдельного restart go2rtc controller обнаруживает пропавшие runtime-streams не позднее чем через минуту и восстанавливает действующий LKG без запроса к Ростелекому.
+- [x] Если API повторно вернул тот же token/profile, PATCH и media probe
+  пропускаются, поэтому активный consumer не обрывается и FFmpeg не запускается.
 
 ### Проверка
 
@@ -112,27 +136,40 @@
 
 Остановить controller; работающий go2rtc сохранит текущие runtime-streams до своего restart или истечения upstream token.
 
-## Фаза 6 — Аудио и диагностика
+## Фаза 6 — Совместимый ленивый media и snapshot
 
-**Цель**: пропустить исходный звук и оставить независимый путь транскодирования.
-**Результат**: `copy`, `aac`, `pcma`, `pcmu`, `none`, включая overrides по UID; video всегда copy.
+**Цель**: устранить зелёный экран, предоставить snapshot и не расходовать CPU без потребителей.
+**Результат**: H.264 CFR/`copy` и независимые `pcma`, `pcmu`, `aac`, `copy`,
+`none`, включая overrides по UID; защищённый JPEG URL для каждой камеры.
 **Статус**: [x] Реализована, [ ] проверена в SprutHub
 
 ### Выполнено
 
-- [x] Media policy не зависит от API Ростелекома и публичных RTSP URL.
-- [x] Healthcheck сверяет state, go2rtc API, JWT expiry и выполняет короткий авторизованный RTSP `DESCRIBE` каждого upstream.
-- [x] `show` печатает все камеры, UID, логин, пароль и готовые ссылки.
+- [x] Media policy независимо выбирает video/audio профиль глобально или по UID
+  (→ [Модуль media policy](../modules/audio_policy.md)).
+- [x] Неровные DTS нормализуются ленивым H.264 CFR-профилем с коротким GOP
+  (→ [Модуль source](../modules/stream_source.md)).
+- [x] Автоматический healthcheck использует RTSP `OPTIONS` и не будит upstream;
+  глубокий `DESCRIBE` доступен через `check-streams`
+  (→ [Модуль диагностики](../modules/healthcheck.md)).
+- [x] `show` печатает RTSP и snapshot URL каждой камеры
+  (→ [Модуль snapshot](../modules/snapshot_endpoint.md)).
+- [x] Одновременные initial probes ограничены одним worker, snapshot — двумя.
 
 ### Проверка
 
-- [x] Unit-тесты всех audio modes и локальный mock RTSP server.
+- [x] Unit-тесты video/audio modes, snapshot Basic Auth и локальный mock RTSP server.
+- [x] На реальных исходных RTSP подтверждены H.264, AAC-LC 48 kHz mono,
+  keyframe примерно раз в секунду и нестабильные DTS.
 - [ ] VLC: видео и наличие аудиодорожки.
-- [ ] SprutHub: `copy`, при необходимости `aac` → `pcma` → `pcmu`.
+- [ ] SprutHub: стабильность H.264 CFR, `pcma`, затем при необходимости `pcmu`.
+- [ ] SprutHub: получение snapshot по напечатанному HTTP URL.
 
 ### Rollback
 
-Вернуть `AUDIO_MODE=copy` или `none` и выполнить `./manage.sh refresh`; go2rtc не останавливается.
+Установить `VIDEO_MODE=copy`, `AUDIO_MODE=copy` или `none` и выполнить
+`./manage.sh refresh`; публичные URL и go2rtc не останавливаются. Полный Git
+rollback возвращает прежний media profile.
 
 ## Фаза 7 — Передача и расширение
 
@@ -150,7 +187,7 @@
 ### Приёмка
 
 - [ ] Выполнить [чек-лист первого запуска](TROUBLESHOOTING.md#чек-лист-первого-запуска).
-- [ ] Ограничить firewall доступом к 8554 только с IP SprutHub, если LAN недоверенная.
+- [ ] Ограничить firewall доступом к 8554 и 8080 только с IP SprutHub, если LAN недоверенная.
 - [ ] Зафиксировать Git-тег после успешной приёмки.
 
 ### Rollback

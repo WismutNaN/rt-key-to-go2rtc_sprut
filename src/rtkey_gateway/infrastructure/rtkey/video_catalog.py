@@ -265,26 +265,41 @@ class FallbackVideoCatalog:
 
     def fetch_feeds(self) -> list[CameraFeed]:
         errors: list[GatewayError] = []
-        empty_result: list[CameraFeed] | None = None
+        completed: dict[str, CameraFeed] = {}
+        successful_strategies = 0
         for index, strategy in enumerate(self.strategies):
             try:
                 feeds = strategy.fetch_feeds()
-                if not feeds and index < len(self.strategies) - 1:
-                    empty_result = feeds
+                successful_strategies += 1
+                if not feeds:
                     self.log.warning(
-                        "Camera adapter %s returned no cameras; trying fallback",
+                        "Camera adapter %s returned no cameras",
                         strategy.name,
                     )
-                    continue
-                if index:
-                    self.log.warning("Using fallback camera adapter: %s", strategy.name)
-                return feeds
+                elif index:
+                    self.log.info(
+                        "Camera adapter %s supplied fallback/completion data",
+                        strategy.name,
+                    )
+                for feed in feeds:
+                    # The current API has priority; an older API only fills a UID
+                    # that was absent from all earlier strategies.
+                    completed.setdefault(feed.camera_id.value, feed)
             except GatewayError as exc:
                 errors.append(exc)
                 self.log.warning("Camera adapter %s failed: %s", strategy.name, exc)
 
-        if empty_result is not None:
-            return empty_result
+        if completed:
+            return list(completed.values())
+        if successful_strategies == len(self.strategies):
+            return []
+        if successful_strategies:
+            # An empty answer from only one API is not strong enough evidence to
+            # remove every existing binding while another provider adapter failed.
+            kinds = ", ".join(type(error).__name__ for error in errors)
+            raise TransportError(
+                f"Camera APIs returned no confirmed catalog ({kinds})"
+            )
         if errors and all(isinstance(error, AuthenticationError) for error in errors):
             raise AuthenticationError("All camera APIs rejected the Bearer token")
         kinds = ", ".join(type(error).__name__ for error in errors)

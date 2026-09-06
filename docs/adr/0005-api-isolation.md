@@ -15,7 +15,11 @@ Controller должен вызывать `PATCH /api/streams`, поэтому AP
 
 ## Решение
 
-Выбрали **API на интерфейсе контейнера, но без секции `ports` для `1984`**, дополнительно с Basic Auth, `local_auth: true` и allowlist единственного пути `/api/streams`. Наружу публикуется только RTSP `8554/tcp` с отдельными credentials.
+Выбрали **API на интерфейсе контейнера, но без секции `ports` для `1984`**,
+дополнительно с Basic Auth, `local_auth: true` и allowlist путей `/api/streams`
+и `/api/frame.jpeg`. Наружу публикуются RTSP `8554/tcp` и отдельный узкий
+snapshot endpoint `8080/tcp` с credentials SprutHub; произвольные методы API и
+Web UI через него недоступны.
 
 ## Последствия
 

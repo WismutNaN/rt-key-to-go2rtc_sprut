@@ -16,6 +16,7 @@ services:
       GO2RTC_API_PASSWORD: ${GO2RTC_API_PASSWORD:?Run ./install.sh first}
       RTSP_USERNAME: ${RTSP_USERNAME:?Run ./install.sh first}
       RTSP_PASSWORD: ${RTSP_PASSWORD:?Run ./install.sh first}
+      VIDEO_FPS: ${VIDEO_FPS:-30}
     volumes:
       - ./go2rtc:/config:ro
     tmpfs:
@@ -51,12 +52,18 @@ services:
       RTSP_PORT: ${RTSP_PORT:-8554}
       RTSP_USERNAME: ${RTSP_USERNAME:?Run ./install.sh first}
       RTSP_PASSWORD: ${RTSP_PASSWORD:?Run ./install.sh first}
-      AUDIO_MODE: ${AUDIO_MODE:-copy}
+      SNAPSHOT_PORT: ${SNAPSHOT_PORT:-8080}
+      SNAPSHOT_LISTEN_PORT: 8080
+      SNAPSHOT_WORKERS: ${SNAPSHOT_WORKERS:-2}
+      VIDEO_MODE: ${VIDEO_MODE:-h264}
+      VIDEO_FPS: ${VIDEO_FPS:-30}
+      VIDEO_OVERRIDES_JSON: ${VIDEO_OVERRIDES_JSON:-{}}
+      AUDIO_MODE: ${AUDIO_MODE:-pcma}
       AUDIO_OVERRIDES_JSON: ${AUDIO_OVERRIDES_JSON:-{}}
       ALLOWED_STREAM_HOST_SUFFIXES: ${ALLOWED_STREAM_HOST_SUFFIXES:-camera.rt.ru}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-20}
       RTSP_PROBE_TIMEOUT_SECONDS: ${RTSP_PROBE_TIMEOUT_SECONDS:-12}
-      RTSP_PROBE_WORKERS: ${RTSP_PROBE_WORKERS:-8}
+      RTSP_PROBE_WORKERS: ${RTSP_PROBE_WORKERS:-1}
       REFRESH_MARGIN_SECONDS: ${REFRESH_MARGIN_SECONDS:-900}
       FALLBACK_REFRESH_SECONDS: ${FALLBACK_REFRESH_SECONDS:-14400}
       RETRY_MIN_SECONDS: ${RETRY_MIN_SECONDS:-30}
@@ -74,6 +81,8 @@ services:
       - go2rtc
     networks:
       - rtkey-net
+    ports:
+      - "${SNAPSHOT_BIND_IP:-0.0.0.0}:${SNAPSHOT_PORT:-8080}:8080/tcp"
     healthcheck:
       test: ["CMD", "python", "-m", "rtkey_gateway", "healthcheck"]
       interval: 60s
