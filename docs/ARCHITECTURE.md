@@ -119,9 +119,9 @@ Shared kernel намеренно минимален и реализован в `
    приоритет сохраняется за новым API.
 9. Реестр сохраняет прежнее имя для известного UID. Для новой камеры он транслитерирует и нормализует `title`; при пустом или конфликтующем title добавляет короткую часть UID.
 10. Из `streamerUrl` извлекается origin медиасервера; фиксированный `live-vdk4` не используется.
-11. Для каждой валидной камеры строится один ленивый `ffmpeg:` source исходного
-    размера. H.264 перепаковывается без decode/encode с demuxer time base, AAC
-    преобразуется в PCMU.
+11. Для каждой валидной камеры строится один ленивый video-only `ffmpeg:` source
+    исходного размера. H.264 перепаковывается без decode/encode с demuxer time
+    base; аудиотрек в стабильном профиле не создаётся.
 12. Контроллер выполняет `PATCH /api/streams?name=<name>&src=<source>`.
     PATCH только регистрирует source и не запускает FFmpeg.
 13. Если source и media profile не изменились и runtime-stream существует,
@@ -171,7 +171,7 @@ class CameraBinding:
 class MediaProfile:
     video_mode: Literal["copy"]
     video_fps: int
-    audio_mode: Literal["pcmu"]
+    audio_mode: Literal["none"]
 
 class MediaResolution:
     width: int | None
@@ -224,7 +224,6 @@ GET https://vc.key.rt.ru/api/v1/cameras?limit=100&offset=0
 ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
   ?mp4-fragment-length=0.5&mp4-use-speed=0&mp4-afiller=1&token=<urlencoded-token>
   #input=rtkey_http#video=rtkey_h264_copy
-  #audio=pcmu
 ```
 
 ## Инварианты
@@ -251,7 +250,7 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | HTTP | Python `urllib` с TLS verification, timeout и запретом redirects | Нет runtime-зависимостей; Bearer не уйдёт на другой host через redirect |
 | go2rtc | `alexxit/go2rtc:1.9.14` | Фиксированная multi-arch версия с FFmpeg внутри |
 | Видео | Один ленивый source с H.264 copy и demuxer time base | Исключает video decode/encode даже при постоянной RTSP-сессии SprutHub |
-| Аудио | Отдельная политика, `audio=pcmu` по умолчанию | Не требует обнаруженного в логах SprutHub преобразования PCMA → PCMU |
+| Аудио | Отдельная политика, `none` по умолчанию | Не создаёт неиспользуемый SprutHub трек; кодеки остаются точками расширения |
 | Snapshot | Basic-auth proxy к внутреннему `/api/frame.jpeg` | SprutHub получает JPEG, а общий API go2rtc остаётся закрыт |
 | Runtime update | `PATCH /api/streams` | Не требует restart и умеет создать отсутствующий stream |
 | Состояние | Версионированный JSON в volume | Небольшой объём, прозрачно и достаточно надёжно |
@@ -274,7 +273,7 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | Повреждён state JSON | Потеря стабильного mapping | Не перезаписывать файл; использовать резервную копию и аварийный статус |
 | Неровные DTS H.264 | Зелёный экран или зависание клиента | Не подменять timestamps wallclock; генерировать отсутствующие PTS и сохранять demuxer time base |
 | Слишком высокая CPU при просмотре | Сервер не успевает кодировать видео | Не кодировать и не масштабировать видео; использовать только source URL без суффикса |
-| SprutHub не показывает звук | Видео есть, UI звука отсутствует | PCMU подаётся напрямую; проверять VLC и учитывать beta-ограничения SprutHub |
+| SprutHub не показывает звук | Видео работает, аудиотрека нет | Ожидаемый video-only профиль; не включать неподтверждённый режим в публичный вывод |
 | Snapshot временно недоступен | Нет превью, RTSP не затронут | HTTP 502/503, ограничение параллелизма и повтор клиента |
 | Камера исчезла из API | Старый endpoint остаётся, но upstream истечёт | Пометить отсутствующей; не переиспользовать её имя автоматически |
 | Порт 8554 занят | RTSP не запускается | Явная ошибка Compose; поддержать настраиваемый host-порт |

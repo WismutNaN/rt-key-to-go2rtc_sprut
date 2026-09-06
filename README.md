@@ -62,8 +62,8 @@ cd rt-key-to-go2rtc_sprut
 напечатает все ссылки. `--server-ip` — LAN IP этого Docker-сервера;
 его можно не указывать, если автоопределение работает верно.
 
-Установщик всегда включает малонагруженный профиль: исходный H.264 передаётся
-без декодирования и кодирования, аудио преобразуется в PCMU. Экспериментальные
+Установщик всегда включает стабильный малонагруженный профиль: исходный H.264
+передаётся без декодирования и кодирования, аудио отключено. Экспериментальные
 профили разрешения в обычной установке не создаются.
 
 ### Добавление кнопок открытия в SprutHub
@@ -129,7 +129,7 @@ Camera: Подъезд [camera-uid]
 Stream name: podezd
 Resolution: source
 Video mode: copy
-Audio mode: pcmu
+Audio: disabled
 RTSP URL:
 rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd
 Snapshot URL:
@@ -143,9 +143,9 @@ http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 
 ## Разрешение и нагрузка
 
-`source + video=copy` сохраняет исходное разрешение и H.264 без video
+`source + video=copy` сохраняет исходное разрешение и H.264 без video/audio
 decode/encode. Это минимальная нагрузка на сервер и рекомендуемый режим для
-SprutHub. Перекодируется только лёгкая аудиодорожка в PCMU.
+SprutHub.
 
 Уменьшение разрешения не предлагается: оно потребовало бы постоянно декодировать,
 масштабировать и снова кодировать H.264. Это уменьшило бы LAN-трафик, но повысило
@@ -165,15 +165,11 @@ git pull
 
 ## Аудио
 
-По умолчанию AAC-LC из upstream преобразуется в `PCMU/8000 mono`: в приведённых
-логах SprutHub сам выбирает PCMU при получении PCMA, поэтому лишнее преобразование
-на хабе больше не требуется.
-
-Сообщения `Audio codec detection: keeping PCMA` и `Selected audio codec PCMU`
-означают, что аудиодорожка уже пришла в SprutHub. Отсутствие кнопки звука после
-этого не исправляется сменой кодека шлюза: [поддержка RTSP-камер в SprutHub](https://wiki.spruthub.ru/Создание_контроллера_Camera)
-пока помечена как beta и может работать частично. Проверьте тот же URL в VLC и
-актуальную версию SprutHub.
+В поддерживаемом профиле аудио намеренно отключено. SprutHub принимал PCMA/PCMU,
+но не предоставлял управление звуком, а второй медиатрек и его перекодирование
+ухудшали восстановление нестабильного потока. Поэтому установщик показывает
+только рабочий video-only вариант. Внутренняя media policy сохраняет отдельные
+аудиорежимы для будущего возврата функции после проверки совместимости.
 
 ## Управление
 
@@ -181,6 +177,7 @@ git pull
 ./manage.sh show          # RTSP and snapshot URLs
 ./manage.sh access        # MQTT settings and access device mapping
 ./manage.sh status        # containers and camera state
+./manage.sh media-status  # one-time CPU, memory, and process counters
 ./manage.sh check-streams # active test of every stream
 ./manage.sh refresh       # refresh camera data without restarting go2rtc
 ./manage.sh logs          # controller logs

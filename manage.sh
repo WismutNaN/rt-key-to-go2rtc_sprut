@@ -14,6 +14,7 @@ Commands:
   show          Show credentials, RTSP URLs, and snapshot URLs
   access        Show MQTT credentials and discovered access devices
   status        Show containers and sanitized controller state
+  media-status  Show one-time CPU, memory, and process counters
   check-streams Actively check every upstream (temporarily starts media)
   logs          Show controller logs without upstream URLs
   logs-media    Show go2rtc/FFmpeg logs (may contain source URLs)
@@ -27,7 +28,7 @@ USAGE
 COMMAND="${1:-}"
 case "$COMMAND" in
     -h|--help|help|"") usage; exit 0 ;;
-    show|access|status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
+    show|access|status|media-status|check-streams|logs|logs-media|refresh|set-token|up|down) ;;
     *)
         echo "Unknown command: $COMMAND" >&2
         usage
@@ -50,6 +51,16 @@ case "$COMMAND" in
     status)
         docker compose ps
         docker compose exec -T controller python -m rtkey_gateway status
+        ;;
+    media-status)
+        mapfile -t container_ids < <(docker compose ps -q go2rtc controller)
+        if (( ${#container_ids[@]} == 0 )); then
+            echo "Media services are not running." >&2
+            exit 1
+        fi
+        docker stats --no-stream \
+            --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}' \
+            "${container_ids[@]}"
         ;;
     check-streams)
         exec docker compose exec -T controller \

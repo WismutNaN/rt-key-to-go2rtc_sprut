@@ -95,15 +95,16 @@ class JsonVideoStateRepository:
             # Unsupported experimental encode/scale profiles are deliberately
             # forgotten. The synchronizer will restore this binding with the
             # current copy-only profile before it contacts the provider.
+            audio_mode = raw_profile.get("audio_mode", "copy")
             supported = (
                 raw_profile.get("video_mode", "copy") == "copy"
-                and raw_profile.get("audio_mode", "copy") == "pcmu"
+                and audio_mode == "none"
                 and raw_profile.get("video_width") is None
                 and raw_profile.get("video_height") is None
             )
             if supported:
                 profile = MediaProfile(
-                    audio_mode=AudioMode.PCMU,
+                    audio_mode=AudioMode.NONE,
                     video_mode=VideoMode.COPY,
                     video_fps=15,
                 )

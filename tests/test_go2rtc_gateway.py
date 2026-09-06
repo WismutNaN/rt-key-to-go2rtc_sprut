@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from rtkey_gateway.domain import (
     AudioMode,
+    MediaPolicy,
     MediaProfile,
     SecretUrl,
     StreamName,
@@ -56,6 +57,15 @@ class Go2RtcGatewayTests(unittest.TestCase):
             MediaProfile(AudioMode.NONE),
         )
         self.assertIn("#input=rtkey_http#video=rtkey_h264_copy", source)
+        self.assertNotIn("audio=", source)
+
+    def test_default_policy_builds_video_only_source(self) -> None:
+        profile = MediaPolicy().profile_for("uid")
+        source = build_go2rtc_source(
+            SecretUrl("https://x.camera.rt.ru/live?token=secret"),
+            profile,
+        )
+        self.assertEqual(profile.audio_mode, AudioMode.NONE)
         self.assertNotIn("audio=", source)
 
     def test_snapshot_uses_internal_authenticated_api(self) -> None:

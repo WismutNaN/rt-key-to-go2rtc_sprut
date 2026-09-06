@@ -80,7 +80,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Stream name: podezd", rendered)
         self.assertIn("Resolution: source", rendered)
         self.assertIn("Video mode: copy", rendered)
-        self.assertIn("Audio mode: pcmu", rendered)
+        self.assertIn("Audio: disabled", rendered)
         self.assertIn("rtsp://spruthub:rtsp-password@192.168.50.99:8554/podezd", rendered)
         self.assertIn(
             "http://spruthub:rtsp-password@192.168.50.99:8080/snapshot/podezd.jpg",

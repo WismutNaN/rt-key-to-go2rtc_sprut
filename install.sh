@@ -326,7 +326,7 @@ for ((_attempt = 1; _attempt <= 90; _attempt++)); do
                     printf '\n%s\n' "$ACCESS_OUTPUT"
                     echo "Import spruthub/rtkey_access_v2.json into the SprutHub MQTT catalog."
                     echo "Then restart the SprutHub MQTT controller to discover retained devices."
-                    echo "Management: ./manage.sh status | show | access | logs | set-token"
+                    echo "Management: ./manage.sh status | media-status | show | access | logs | set-token"
                     exit 0
                 fi
                 sleep 2
@@ -335,7 +335,7 @@ for ((_attempt = 1; _attempt <= 90; _attempt++)); do
             echo "Check: ./manage.sh status && ./manage.sh logs" >&2
             exit 1
         fi
-        echo "Management: ./manage.sh status | show | access | logs | set-token"
+        echo "Management: ./manage.sh status | media-status | show | access | logs | set-token"
         exit 0
     fi
     sleep 2

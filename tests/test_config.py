@@ -54,7 +54,7 @@ class SettingsTests(unittest.TestCase):
     def test_default_media_profile_avoids_video_transcoding(self) -> None:
         settings = Settings.from_env(environment())
         profile = settings.media_policy.profile_for("uid")
-        self.assertEqual(profile.audio_mode, AudioMode.PCMU)
+        self.assertEqual(profile.audio_mode, AudioMode.NONE)
         self.assertEqual(profile.video_mode, VideoMode.COPY)
         self.assertEqual(profile.video_fps, 15)
         self.assertEqual(
@@ -75,7 +75,7 @@ class SettingsTests(unittest.TestCase):
         )
         profile = settings.media_policy.profile_for("uid")
         self.assertEqual(profile.video_mode, VideoMode.COPY)
-        self.assertEqual(profile.audio_mode, AudioMode.PCMU)
+        self.assertEqual(profile.audio_mode, AudioMode.NONE)
         self.assertEqual(profile.video_fps, 15)
         self.assertEqual(
             [item.key for item in settings.media_policy.resolutions],

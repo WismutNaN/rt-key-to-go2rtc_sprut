@@ -25,7 +25,7 @@ Camera: Подъезд [camera-uid]
 Stream name: podezd
 Resolution: source
 Video mode: copy
-Audio mode: pcmu
+Audio: disabled
 RTSP URL:
 rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd
 Snapshot URL:
@@ -53,8 +53,8 @@ http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 
 Docker-вариант реализован полностью. По реальным RTSP-потокам подтверждены H.264,
 AAC-LC 48 kHz mono, частые keyframes и нестабильные DTS исходного fragmented MP4.
-Видео проходит без декодирования; опасная подмена timestamps системным временем
-удалена. На машине разработки выполнены только
+Видео проходит без декодирования; аудио в стабильном профиле отключено, опасная
+подмена timestamps системным временем удалена. На машине разработки выполнены только
 офлайн-тесты Python и статические проверки; Docker по условию владельца не
 запускался. MQTT-кнопки управления доступом также реализованы, но требуют
 приёмки с реальным аккаунтом и broker SprutHub на целевом Linux-сервере.

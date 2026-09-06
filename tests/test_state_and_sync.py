@@ -80,7 +80,7 @@ class StateRepositoryTests(unittest.TestCase):
                         StreamName("podezd"),
                         "Подъезд",
                         last_good_upstream=SecretUrl("https://x.camera.rt.ru/?token=secret"),
-                        last_good_profile=MediaProfile(AudioMode.PCMU),
+                        last_good_profile=MediaProfile(AudioMode.NONE),
                         last_good_expires_at=2_000_000_000,
                     )
                 }
@@ -93,7 +93,7 @@ class StateRepositoryTests(unittest.TestCase):
             self.assertIsNone(recovered.last_fetch_at)
             self.assertEqual(
                 recovered.bindings["uid"].last_good_profile.audio_mode,
-                AudioMode.PCMU,
+                AudioMode.NONE,
             )
             self.assertNotIn("last_good_upstream", str(repository.sanitized()))
             repository.save(recovered)
@@ -148,8 +148,69 @@ class StateRepositoryTests(unittest.TestCase):
             state = JsonVideoStateRepository(path).load()
             self.assertIsNone(state.bindings["uid"].last_good_profile)
 
+    def test_legacy_pcmu_profile_is_forgotten_for_video_only_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bindings": {
+                            "uid": {
+                                "camera_id": "uid",
+                                "stream_name": "camera",
+                                "title": "Camera",
+                                "present": True,
+                                "last_good_profile": {
+                                    "video_mode": "copy",
+                                    "video_fps": 15,
+                                    "audio_mode": "pcmu",
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = JsonVideoStateRepository(path).load()
+            self.assertIsNone(state.bindings["uid"].last_good_profile)
+
 
 class SynchronizerTests(unittest.TestCase):
+    def test_existing_pcmu_profile_is_migrated_to_video_only(self) -> None:
+        feed = make_feed("uid", "Camera", 5_000)
+        state = GatewayState(
+            bindings={
+                "uid": CameraBinding(
+                    CameraId("uid"),
+                    StreamName("camera"),
+                    "Camera",
+                    last_good_upstream=feed.upstream_url,
+                    last_good_profile=MediaProfile(AudioMode.PCMU),
+                    last_good_expires_at=5_000,
+                )
+            }
+        )
+        repository = MemoryRepository(state)
+        gateway = Gateway()
+        gateway.names.add("camera")
+        result = SynchronizeVideoFeeds(
+            Catalog([feed]),
+            gateway,
+            repository,
+            FakeClock(1_000),
+            MediaPolicy(),
+            media_probe=Probe({"camera"}),
+        ).refresh_once()
+
+        self.assertEqual((result.updated, result.failed), (1, 0))
+        self.assertEqual(gateway.updates[-1][2].audio_mode, AudioMode.NONE)
+        self.assertEqual(
+            repository.state.bindings["uid"].last_good_profile.audio_mode,
+            AudioMode.NONE,
+        )
+
     def test_refresh_updates_all_and_schedules_before_expiry(self) -> None:
         now = 1_000
         feeds = [make_feed("a", "Подъезд", 5_000), make_feed("b", "Двор", 6_000)]

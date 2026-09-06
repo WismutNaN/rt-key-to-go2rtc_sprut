@@ -83,7 +83,7 @@ class MediaPolicyTests(unittest.TestCase):
     def test_low_load_defaults_copy_source_video(self) -> None:
         policy = MediaPolicy()
         profile = policy.profile_for("uid")
-        self.assertEqual(profile.audio_mode, AudioMode.PCMU)
+        self.assertEqual(profile.audio_mode, AudioMode.NONE)
         self.assertEqual(profile.video_mode, VideoMode.COPY)
         self.assertEqual(profile.video_fps, 15)
         self.assertEqual(

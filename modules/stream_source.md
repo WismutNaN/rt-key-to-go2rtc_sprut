@@ -21,7 +21,7 @@
 ## Инварианты
 
 - Полученный upstream URL не изменяется и не разбирается повторно.
-- Видео всегда использует copy template с demuxer time base; аудио — PCMU.
+- Видео всегда использует copy template с demuxer time base; по умолчанию аудио отсутствует.
 - Полный source не попадает в обычный лог.
 
 ## Намеренно НЕ обрабатывает
@@ -32,7 +32,7 @@
 ## Заметки для агента
 
 > По умолчанию формируется
-> `#input=rtkey_http#video=rtkey_h264_copy#audio=pcmu`. FFmpeg только
-> перепаковывает H.264, сохраняя demuxer time base, и используется go2rtc лениво —
+> `#input=rtkey_http#video=rtkey_h264_copy`. FFmpeg только перепаковывает H.264,
+> сохраняя demuxer time base, и используется go2rtc лениво —
 > только при наличии consumer. Допустимость hostname проверяет Rostelecom adapter до
 > создания `SecretUrl`.

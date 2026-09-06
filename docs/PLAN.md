@@ -4,7 +4,7 @@
 
 Основная реализация завершена. Старый systemd/cron-вариант заменён Docker
 Compose-развёртыванием из двух контейнеров. После первой серверной проверки
-добавлены on-demand snapshot, H.264 copy, PCMU по умолчанию и ленивый
+добавлены on-demand snapshot, video-only H.264 copy и ленивый
 healthcheck. На машине разработки Docker намеренно не запускался; выполнены
 unit/contract/architecture-тесты и статические проверки. Осталась повторная
 приёмка на целевом Linux-сервере.
@@ -140,7 +140,7 @@ unit/contract/architecture-тесты и статические проверки
 ## Фаза 6 — Совместимый ленивый media и snapshot
 
 **Цель**: устранить зелёный экран, предоставить snapshot и не расходовать CPU без потребителей.
-**Результат**: один H.264 copy source, PCMU и защищённый JPEG URL каждой камеры.
+**Результат**: один video-only H.264 copy source и защищённый JPEG URL каждой камеры.
 **Статус**: [x] Реализована, [ ] проверена в SprutHub
 
 ### Выполнено
@@ -157,14 +157,16 @@ unit/contract/architecture-тесты и статические проверки
 - [x] `show` печатает RTSP и snapshot URL каждой камеры
   (→ [Модуль snapshot](../modules/snapshot_endpoint.md)).
 - [x] Одновременные initial probes ограничены одним worker, snapshot — двумя.
+- [x] После полевой диагностики PCMU исключён из стабильного профиля, HTTP read
+  timeout снижен с 15 до 5 секунд, RTSP по умолчанию объявляет только video.
 
 ### Проверка
 
-- [x] Unit-тесты video/audio modes, snapshot Basic Auth и локальный mock RTSP server.
+- [x] Unit-тесты video/audio modes, миграции PCMU → none, snapshot Basic Auth и локальный mock RTSP server.
 - [x] На реальных исходных RTSP подтверждены H.264, AAC-LC 48 kHz mono,
   keyframe примерно раз в секунду и нестабильные DTS.
-- [ ] VLC: видео и наличие аудиодорожки.
-- [ ] SprutHub: стабильность H.264 copy и PCMU.
+- [ ] VLC: стабильность video-only H.264.
+- [ ] SprutHub: стабильность video-only H.264 после повторного добавления камеры.
 - [ ] SprutHub: получение snapshot по напечатанному HTTP URL.
 
 ### Rollback

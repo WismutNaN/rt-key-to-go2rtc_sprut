@@ -191,7 +191,10 @@ def command_show(container: Container) -> int:
             stream_name = variant.stream_name_value(binding.stream_name.value)
             print(f"Resolution: {variant.resolution.key}")
             print(f"Video mode: {variant.profile.video_mode.value}")
-            print(f"Audio mode: {variant.profile.audio_mode.value}")
+            if variant.profile.audio_mode.value == "none":
+                print("Audio: disabled")
+            else:
+                print(f"Audio mode: {variant.profile.audio_mode.value}")
             print("RTSP URL:")
             print(
                 f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"
