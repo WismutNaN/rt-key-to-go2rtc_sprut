@@ -15,13 +15,15 @@ rtsp:
 
 ffmpeg:
   rtkey_http: >-
-    -fflags +genpts+discardcorrupt+nobuffer -flags low_delay
+    -fflags +genpts+igndts+discardcorrupt+nobuffer -flags low_delay
     -rw_timeout 5000000
     -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1
     -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx
     -reconnect_delay_max 2 -i {input}
   rtkey_h264_copy: >-
     -codec:v copy -copytb 1
+  rtkey_low_latency: >-
+    -flush_packets 1
 
 webrtc:
   listen: ""

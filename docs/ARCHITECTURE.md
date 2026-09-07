@@ -223,7 +223,7 @@ GET https://vc.key.rt.ru/api/v1/cameras?limit=100&offset=0
 ```text
 ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
   ?mp4-fragment-length=0.5&mp4-use-speed=0&mp4-afiller=1&token=<urlencoded-token>
-  #input=rtkey_http#video=rtkey_h264_copy
+  #input=rtkey_http#video=rtkey_h264_copy#raw=rtkey_low_latency
 ```
 
 ## Инварианты
@@ -271,7 +271,7 @@ ffmpeg:https://<host-from-streamerUrl>/stream/<uid>/live.mp4
 | PATCH/probe одной камеры не прошёл | Новая конфигурация этой камеры отклоняется | Вернуть её прежние upstream и media profile, не менять LKG, повторить отдельно |
 | go2rtc перезапущен | Runtime-streams исчезли | Controller повторно применяет LKG и свежие sources |
 | Повреждён state JSON | Потеря стабильного mapping | Не перезаписывать файл; использовать резервную копию и аварийный статус |
-| Неровные DTS H.264 | Зелёный экран или зависание клиента | Не подменять timestamps wallclock; генерировать отсутствующие PTS и сохранять demuxer time base |
+| Неровные DTS H.264 | Зелёный экран, задержка или зависание клиента | Не подменять timestamps wallclock; генерировать отсутствующие PTS, игнорировать DTS при наличии PTS, сохранять demuxer time base и сразу отправлять выходные пакеты |
 | Слишком высокая CPU при просмотре | Сервер не успевает кодировать видео | Не кодировать и не масштабировать видео; использовать только source URL без суффикса |
 | SprutHub не показывает звук | Видео работает, аудиотрека нет | Ожидаемый video-only профиль; не включать неподтверждённый режим в публичный вывод |
 | Snapshot временно недоступен | Нет превью, RTSP не затронут | HTTP 502/503, ограничение параллелизма и повтор клиента |

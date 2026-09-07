@@ -203,7 +203,7 @@ def command_show(container: Container) -> int:
             print("RTSP URL:")
             print(
                 f"rtsp://{user}:{password}@{host}:{settings.rtsp_port}/"
-                f"{stream_name}"
+                f"{stream_name}?video"
             )
             print("Snapshot URL:")
             print(

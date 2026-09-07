@@ -48,7 +48,10 @@ class Go2RtcGatewayTests(unittest.TestCase):
         query = parse_qs(urlsplit(url).query)
         self.assertEqual(method, "PATCH")
         self.assertEqual(query["name"], ["podezd"])
-        self.assertIn("#video=rtkey_h264_copy#audio=copy", query["src"][0])
+        self.assertIn(
+            "#video=rtkey_h264_copy#raw=rtkey_low_latency#audio=copy",
+            query["src"][0],
+        )
         self.assertTrue(headers["Authorization"].startswith("Basic "))
 
     def test_audio_none_omits_audio_selector(self) -> None:
@@ -56,7 +59,10 @@ class Go2RtcGatewayTests(unittest.TestCase):
             SecretUrl("https://x.camera.rt.ru/live?token=secret"),
             MediaProfile(AudioMode.NONE),
         )
-        self.assertIn("#input=rtkey_http#video=rtkey_h264_copy", source)
+        self.assertIn(
+            "#input=rtkey_http#video=rtkey_h264_copy#raw=rtkey_low_latency",
+            source,
+        )
         self.assertNotIn("audio=", source)
 
     def test_default_policy_builds_video_only_source(self) -> None:
@@ -66,6 +72,7 @@ class Go2RtcGatewayTests(unittest.TestCase):
             profile,
         )
         self.assertEqual(profile.audio_mode, AudioMode.NONE)
+        self.assertIn("#raw=rtkey_low_latency", source)
         self.assertNotIn("audio=", source)
 
     def test_snapshot_uses_internal_authenticated_api(self) -> None:

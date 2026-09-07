@@ -132,7 +132,7 @@ Resolution: source
 Video mode: copy
 Audio: disabled
 RTSP URL:
-rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd
+rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd?video
 Snapshot URL:
 http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 ==========================================
@@ -140,13 +140,17 @@ http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 
 В SprutHub добавьте **один** RTSP-вариант каждой физической камеры и
 соответствующий snapshot URL. ONVIF не нужен. Все URL можно повторно
-показать командой `./manage.sh show`.
+показать командой `./manage.sh show`. Суффикс `?video` обязателен: он явно
+запрещает согласование старого аудиотрека. После обновления удалите прежнюю
+камеру в SprutHub и создайте её заново по напечатанной ссылке.
 
 ## Разрешение и нагрузка
 
 `source + video=copy` сохраняет исходное разрешение и H.264 без video/audio
 decode/encode. Это минимальная нагрузка на сервер и рекомендуемый режим для
-SprutHub.
+SprutHub. FFmpeg не использует DTS, когда пакет уже содержит PTS, и
+сразу передаёт готовые пакеты в go2rtc, не накапливая дополнительную выходную
+очередь.
 
 Уменьшение разрешения не предлагается: оно потребовало бы постоянно декодировать,
 масштабировать и снова кодировать H.264. Это уменьшило бы LAN-трафик, но повысило

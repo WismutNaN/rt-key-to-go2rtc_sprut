@@ -35,7 +35,7 @@ class Go2RtcRtspProbe:
             path = ""
         else:
             method = "DESCRIBE"
-            path = quote(stream_name, safe="-_")
+            path = f"{quote(stream_name, safe='-_')}?video"
         uri = f"rtsp://{self.host}:{self.port}/{path}"
         request = (
             f"{method} {uri} RTSP/1.0\r\n"

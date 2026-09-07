@@ -27,7 +27,7 @@ Resolution: source
 Video mode: copy
 Audio: disabled
 RTSP URL:
-rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd
+rtsp://spruthub:<generated-password>@192.168.1.50:8554/podezd?video
 Snapshot URL:
 http://spruthub:<generated-password>@192.168.1.50:8080/snapshot/podezd.jpg
 ==========================================

@@ -45,6 +45,7 @@ class RtspProbeTests(unittest.TestCase):
         self.assertTrue(result.server_reachable)
         self.assertEqual(result.available_streams, frozenset({"podezd"}))
         self.assertIn(b"DESCRIBE rtsp://127.0.0.1", server.request)
+        self.assertIn(b"/podezd?video RTSP/1.0", server.request)
         self.assertIn(b"Authorization: Basic", server.request)
 
 

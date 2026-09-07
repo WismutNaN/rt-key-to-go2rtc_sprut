@@ -10,7 +10,7 @@ from rtkey_gateway.domain import AudioMode, MediaProfile, SecretUrl
 def build_go2rtc_source(upstream_url: SecretUrl, profile: MediaProfile) -> str:
     source = (
         f"ffmpeg:{upstream_url.value}"
-        "#input=rtkey_http#video=rtkey_h264_copy"
+        "#input=rtkey_http#video=rtkey_h264_copy#raw=rtkey_low_latency"
     )
     if profile.audio_mode is not AudioMode.NONE:
         source += f"#audio={profile.audio_mode.value}"
